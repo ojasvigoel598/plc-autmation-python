@@ -417,6 +417,9 @@ reflected in the operating-state machine above.
   `python docs/engineering_guide.py` (stdlib only — no python-docx needed).
 * `docs/PLC_CONCEPTS.md` — PLC fundamentals mapped to this codebase.
 * `docs/QUICKSTART.md` — installation and the legacy CLI modules.
+* `docs/COMPARATIVE_ANALYSIS.md` — research positioning vs OpenPLC, Beremiz,
+  commercial virtual-commissioning tooling and the digital-twin literature:
+  top strengths, real-scale improvements, honest weaknesses.
 * `docs/screenshots/digital-twin-3d.png` — live capture of the 3D twin.
 
 ## 13. Future improvements
