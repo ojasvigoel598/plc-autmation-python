@@ -58,7 +58,6 @@ class ErrorBoundary extends Component {
 
 const TANK_ORDER = ["TK-101", "TK-102", "TK-103"];
 const VALVE_ORDER = ["XV-101", "XV-102", "XV-103"];
-const LO = 10, HI = 85, HIHI = 95;
 
 const L_PER_S = (m3s) => ((m3s || 0) * 1000).toFixed(2);
 
@@ -76,10 +75,14 @@ function fmtTime(t) {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-function levelColor(pct) {
-  if (pct >= HIHI) return "crit";
-  if (pct >= HI) return "warn";
-  if (pct <= LO) return "warn";
+/* Level-colour bands come from the backend's alarm thresholds (fractions
+   of tank height), so the HMI can never drift from the PLC's limits. */
+function levelColor(pct, thr) {
+  const lo = (thr?.level_lo ?? 0.1) * 100;
+  const hi = (thr?.level_hi ?? 0.85) * 100;
+  const hihi = (thr?.level_hihi ?? 0.95) * 100;
+  if (pct >= hihi) return "crit";
+  if (pct >= hi || pct <= lo) return "warn";
   return "";
 }
 
@@ -265,7 +268,7 @@ function Overview({ config, state, selected, onSelect }) {
                 <span className="tag">{tk.tag}</span>
                 <span className="val">{lvl.toFixed(2)} m</span>
                 <div className="levelbar" style={{ width: "46%" }}>
-                  <i className={levelColor(pct)} style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+                  <i className={levelColor(pct, config.alarms)} style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
                 </div>
                 <span className="val">{pct.toFixed(0)} %</span>
               </div>
