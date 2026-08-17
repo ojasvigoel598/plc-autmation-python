@@ -130,3 +130,8 @@ def test_plant_config_endpoint():
             assert "x" in v and "y" in v
         # Valve topology drives pipe routing in the 3D scene.
         assert cfg["valves"][0]["upstream"] in {"TK-101", "TK-102", "TK-103"}
+        # Alarm thresholds are served so the HMI never hard-codes them.
+        import scada.config as c
+        assert cfg["alarms"] == {"level_lo": c.LEVEL_LO,
+                                  "level_hi": c.LEVEL_HI,
+                                  "level_hihi": c.LEVEL_HIHI}

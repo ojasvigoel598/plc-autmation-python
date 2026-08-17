@@ -378,6 +378,12 @@ class Runtime:
             "reservoir": config.LAYOUT.get("reservoir", {}),
             "drain": config.LAYOUT.get("drain", {}),
             "loops": loops,
+            "alarms": {
+                # level thresholds as fractions of tank height (0..1)
+                "level_lo": config.LEVEL_LO,
+                "level_hi": config.LEVEL_HI,
+                "level_hihi": config.LEVEL_HIHI,
+            },
             "rates": {"process": config.PROCESS_DT, "plc_scan": config.PLC_SCAN_DT,
                       "ui": config.UI_REFRESH_DT},
         }
