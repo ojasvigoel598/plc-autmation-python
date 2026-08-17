@@ -407,6 +407,18 @@ was evaluated and is **not used** here: it targets real PLCopen XML / OPC UA
 projects, not runtime simulation.  Its ISA-88 skill state-machine idea is
 reflected in the operating-state machine above.
 
+## 14. Documentation
+
+* **`docs/PLCSim_Engineering_Guide.docx`** — beginner-friendly engineering
+  guide (16 sections): the required math/PLC/software background, a full
+  walkthrough of the process model, the PLC engine, the PID, alarms, leak
+  detection, the backend and the 3D HMI, plus a framework-adaptation part
+  and an honest production-readiness assessment.  Regenerate with
+  `python docs/engineering_guide.py` (stdlib only — no python-docx needed).
+* `docs/PLC_CONCEPTS.md` — PLC fundamentals mapped to this codebase.
+* `docs/QUICKSTART.md` — installation and the legacy CLI modules.
+* `docs/screenshots/digital-twin-3d.png` — live capture of the 3D twin.
+
 ## 13. Future improvements
 
 * Cascade or feed-forward control, gain scheduling.
