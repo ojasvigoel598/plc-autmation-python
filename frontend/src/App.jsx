@@ -194,10 +194,16 @@ function TankInspector({ tag, state, config }) {
 /* ============================================================ */
 /* Top bar                                                       */
 /* ============================================================ */
-function TopBar({ connected, state, t, scan, onLeaks }) {
+function TopBar({ connected, state, t, scan, onLeaks, lastActivity }) {
   const plc = state?.state || "IDLE";
   const hasAlarm = (state?.alarms || []).some((a) => a.state === "ACTIVE");
   const hasLeak = state?.leaks?.active && Object.keys(state.leaks.active).length > 0;
+  // Telemetry staleness: an open link with no fresh state is a fault, not OK.
+  const [stale, setStale] = useState(false);
+  useEffect(() => {
+    const id = setInterval(() => setStale(Date.now() - (lastActivity || 0) > 3500), 1000);
+    return () => clearInterval(id);
+  }, [lastActivity]);
   return (
     <header className="topbar">
       <div className="brand">
@@ -210,8 +216,8 @@ function TopBar({ connected, state, t, scan, onLeaks }) {
       <button className={`btn small ${hasLeak ? "danger" : ""}`} onClick={onLeaks}>
         💧 LEAKS
       </button>
-      <span className={`chip ${connected ? "ok" : "bad"}`}>
-        {connected ? "● LINK OK" : "○ RECONNECTING…"}
+      <span className={`chip ${connected && !stale ? "ok" : "bad"}`}>
+        {connected ? (stale ? "○ STALE — no data" : "● LINK OK") : "○ RECONNECTING…"}
       </span>
       <span className={`chip ${stateClass(plc)}`}>{plc}</span>
       <span className={`chip ${hasAlarm ? "fault" : "ok"}`}>
@@ -663,7 +669,7 @@ function Faults({ state, send }) {
 /* App root                                                      */
 /* ============================================================ */
 export default function App() {
-  const { config, state, trends, connected, sendCommand } = useSimulation();
+  const { config, state, trends, connected, lastActivity, sendCommand } = useSimulation();
   const { route, navigate } = useRoute();
   const [tab, setTab] = useState("Overview");
   const [selected, setSelected] = useState(null);
@@ -712,7 +718,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <TopBar connected={connected} state={state} t={state?.t} scan={state?.scan_count} onLeaks={() => navigate("/leaks")} />
+      <TopBar connected={connected} state={state} t={state?.t} scan={state?.scan_count} lastActivity={lastActivity} onLeaks={() => navigate("/leaks")} />
       <div className="main">
         <div className="viewport">
           {estop && <div className="banner">⚠ EMERGENCY STOP ACTIVE</div>}
