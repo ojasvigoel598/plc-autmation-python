@@ -100,6 +100,10 @@ body {
 
 .levelbar { height: 12px; background: #0b0f15; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; margin: 2px 0 6px; }
 
+/* PLC internals: function-block timer progress bars */
+.fb-bar { display: inline-block; width: 44px; height: 6px; background: #0b0f15; border: 1px solid var(--border); border-radius: 2px; margin-left: 6px; vertical-align: middle; overflow: hidden; }
+.fb-bar i { display: block; height: 100%; background: var(--blue); transition: width .1s; }
+
 /* inspector: label / value / source-variable trace */
 .ins-row { display: grid; grid-template-columns: 104px 1fr auto; gap: 8px; padding: 3px 0; font-family: var(--mono); font-size: 12px; align-items: baseline; }
 .ins-row .k { color: var(--dim); }

@@ -3,6 +3,7 @@ import { useSimulation, interlockReason } from "./sim.js";
 import PlantScene from "./PlantScene.jsx";
 import TrendChart from "./TrendChart.jsx";
 import LeakView from "./LeakView.jsx";
+import PlcView from "./PlcView.jsx";
 
 /* Minimal client-side router.  The SPA is mounted at BASE_URL (/app/ in
    production, / in dev); routes are expressed relative to that base. */
@@ -657,7 +658,7 @@ export default function App() {
         </div>
         <aside className="sidebar">
           <div className="tabs">
-            {["Overview", "Controls", "Alarms", "Trends", "Faults"].map((t) => (
+            {["Overview", "PLC", "Controls", "Alarms", "Trends", "Faults"].map((t) => (
               <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
                 {t}
               </button>
@@ -668,6 +669,7 @@ export default function App() {
               {tab === "Overview" && (
                 <Overview config={config} state={state} selected={selected} onSelect={setSelected} />
               )}
+              {tab === "PLC" && <PlcView state={state} />}
               {tab === "Controls" && <Controls config={config} state={state} send={send} />}
               {tab === "Alarms" && <Alarms state={state} send={send} />}
               {tab === "Trends" && <Trends trends={trends} />}
