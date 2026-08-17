@@ -130,6 +130,45 @@ def test_snapshot_exposes_plc_internals(settled):
     assert plc["loop_mode"]["LIC-101"] == "AUTO"
 
 
+def test_valve_feedback_is_actual_position(settled):
+    """The PLC input image must read the real (slew-limited) position, not
+    the commanded value, so travel-deviation detection is meaningful."""
+    rt = settled
+    for _ in range(10):
+        rt.step()
+    for vtag in ("XV-101", "XV-102", "XV-103"):
+        actual_pct = rt.plant.valves[vtag].open_frac * 100.0
+        # FB is sampled before the scan that moves the actuator, so it may
+        # lag the position by up to one scan of slew (5% at 0.5/s * 0.1 s).
+        assert rt.plc.ai[f"{vtag}_FB"] == pytest.approx(actual_pct, abs=5.0)
+    s = rt.snapshot()
+    assert s["valves"]["XV-102"]["eff"] == pytest.approx(
+        rt.plant.valves["XV-102"].open_frac * 100.0, abs=1e-9)
+    assert s["pump"]["eff"] == pytest.approx(
+        rt.plant.pumps["P-101"].speed * 100.0, abs=1e-9)
+
+
+def test_normal_stop_does_not_raise_valve_fault(settled):
+    """A normal stop closes the valves via their slew rate; the travel
+    watchdog (2 s TON) must not nuisance-trip on a healthy actuator."""
+    rt = settled
+    rt.plc.pulse_stop()
+    run(rt, 5.0)
+    assert rt.plc.state == "IDLE"
+    assert "VALVE_FAULT" not in rt.plc.alarms.active
+    assert rt.plc._valve_fault_latch.q is False
+    assert all(rt.plant.valves[t].open_frac == pytest.approx(0.0, abs=1e-9)
+               for t in rt.plant.valves)
+
+
+def test_estop_slew_to_failsafe_is_not_a_valve_fault(settled):
+    rt = settled
+    rt.plc.set_estop(True)
+    run(rt, 5.0)
+    assert rt.plc.state == "E_STOPPED"
+    assert "VALVE_FAULT" not in rt.plc.alarms.active
+
+
 def test_nan_transmitter_fault_propagates_to_plc(settled):
     """A NAN transmitter must surface as NaN telemetry (not silently clamp
     to full scale) and force the affected loop to a safe manual output."""

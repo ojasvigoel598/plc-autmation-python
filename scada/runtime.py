@@ -54,10 +54,6 @@ class Runtime:
         # Trending history (full resolution, downsampled by the server).
         self.history: deque[dict] = deque(maxlen=20000)
 
-        self._last_effective_pump = 0.0
-        self._last_effective_valves = {t: self.plant.valves[t].open_frac
-                                       for t in self.plant.valves}
-
     # ------------------------------------------------------------------
     # Scan cycle
     # ------------------------------------------------------------------
@@ -76,6 +72,8 @@ class Runtime:
         # (A real PLC reads the contactor, not the flow; flow is telemetry.)
         pump_energised = plc.q["Q0.0_PUMP"] and not self.pump_tripped
         plc.set_pump_feedback(pump_energised)
+        # Valve position feedback comes from the *actual* (slew-limited)
+        # actuator position, as a position transmitter would report it.
         for vtag in self.valve_stuck:
             plc.set_valve_feedback(vtag, self._valve_position_pct(vtag))
 
@@ -110,15 +108,12 @@ class Runtime:
         # 5) LEAK DETECTION: reconcile each tank's mass balance.
         self._detect_leaks(dt)
 
-        self._last_effective_pump = eff_pump
-        self._last_effective_valves = dict(eff_valves)
-
         self._record_history()
         return self.snapshot()
 
     def _valve_position_pct(self, tag: str) -> float:
-        """Effective valve position (%) for feedback telemetry."""
-        return self._last_effective_valves.get(tag, 0.0) * 100.0
+        """Actual valve position (%) as read by a position transmitter."""
+        return self.plant.valves[tag].open_frac * 100.0
 
     # ------------------------------------------------------------------
     # Leak detection
@@ -207,7 +202,7 @@ class Runtime:
     def stick_valve(self, tag: str) -> None:
         if tag in self.valve_stuck:
             self.valve_stuck[tag] = True
-            self.valve_stuck_pos[tag] = self._last_effective_valves.get(tag, 0.0)
+            self.valve_stuck_pos[tag] = self.plant.valves[tag].open_frac
 
     def unstick_valve(self, tag: str) -> None:
         if tag in self.valve_stuck:
@@ -283,14 +278,14 @@ class Runtime:
             "flows": {k: v for k, v in plant.flows.items()},
             "pump": {
                 "cmd": plc.aq["P-101"],
-                "eff": self._last_effective_pump * 100.0,
+                "eff": plant.pumps["P-101"].speed * 100.0,  # actual speed
                 "running": plc.q["Q0.0_PUMP"],
                 "feedback": plc.i["I0.4_PUMP_FB"],
             },
             "valves": {
                 tag: {
                     "cmd": plc.aq[tag],
-                    "eff": self._last_effective_valves.get(tag, 0.0) * 100.0,
+                    "eff": plant.valves[tag].open_frac * 100.0,  # actual pos
                     "manual": plc.manual_valves.get(tag, None),
                     "blocked": plant.valves[tag].blocked,
                 }

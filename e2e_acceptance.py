@@ -92,24 +92,28 @@ async def main():
             # 7) E-stop: highest authority, forces fail-safe
             r = await c.post("/api/control/estop", json={"active": True})
             check("estop ok", r.status_code == 200)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.7)
             r = await c.get("/api/state")
             st = r.json()
             check("state == E_STOPPED", st["state"] == "E_STOPPED", st["state"])
-            check("pump eff forced 0", abs(st["pump"]["eff"]) < 1e-6, str(st["pump"]["eff"]))
             check("estop alarm raised", any(a["tag"] == "ESTOP" for a in st["alarms"]))
+            # Actuators physically slew to fail-safe (0.5 stroke/s -> ~2 s).
+            await asyncio.sleep(3.5)
+            r = await c.get("/api/state")
+            st = r.json()
+            check("pump eff at fail-safe", abs(st["pump"]["eff"]) < 1e-6, str(st["pump"]["eff"]))
 
             # 8) unsafe action while E-stopped: manual valve command is accepted
             #    at the register level but the PLC forces the effective position
             #    to fail-safe (0) -- the UI shows cmd vs eff + interlock reason.
             r = await c.post("/api/control/manual_valve", json={"tag": "XV-102", "position": 80})
             check("manual valve register accepted", r.status_code == 200)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.7)
             r = await c.get("/api/state")
             v = r.json()["valves"]["XV-102"]
-            check("operator request recorded", abs(v["manual"] - 80) < 1e-6, str(v["manual"]))
+            check("operator request recorded", str(v["manual"]) == "80.0", str(v["manual"]))
             check("valve output forced 0 (interlock)", abs(v["cmd"]) < 1e-6, str(v["cmd"]))
-            check("valve eff forced 0 (interlock)", abs(v["eff"]) < 1e-6, str(v["eff"]))
+            check("valve eff at fail-safe (interlock)", abs(v["eff"]) < 1e-6, str(v["eff"]))
 
             # 9) recovery: release E-stop then reset
             r = await c.post("/api/control/estop", json={"active": False})
