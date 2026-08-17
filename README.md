@@ -167,6 +167,12 @@ Gains were tuned empirically (see `tests/test_control_loop.py`): a 0.2 m
 setpoint step settles in ~30 s with ~20 % overshoot (the valve saturates, as
 a real actuator would) and **zero steady-state error**.
 
+![Closed-loop response from the simulated plant](docs/demo_response.png)
+
+The figure above is generated from the *actual* model by
+`docs/generate_demo_figure.py` — the same plant, PID and RK4 integrator used
+by the live simulator — showing the setpoint step and the PI response.
+
 ## 6. Simulation & numerical method
 
 Four rates are explicitly separated:
