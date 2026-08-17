@@ -377,17 +377,37 @@ export default function PlantScene({ config, state, selected, onSelect }) {
     return <div className="vp-hint">Loading plant configuration…</div>;
   }
 
+  // A travel-fault alarm carries no valve tag; attribute it to the device
+  // that actually misbehaves (a stuck valve, else the largest deviation).
+  const valveFaultAlarm = (state?.alarms || []).find((a) => /VALVE/.test(a.tag));
+  const stuck = state?.faults?.valve_stuck || {};
+  const offender =
+    valveFaultAlarm && config
+      ? config.valves.map((v) => v.tag).find((t) => stuck[t]) ||
+        [...config.valves.map((v) => v.tag)].sort((a, b) => {
+          const dev = (tag) => {
+            const v = state?.valves?.[tag] || {};
+            return Math.abs((v.cmd || 0) - (v.eff || 0));
+          };
+          return dev(b) - dev(a);
+        })[0]
+      : null;
+  const alarmEq = (a) => {
+    const eq = alarmEquipment(a);
+    return /VALVE/.test(a.tag) && offender ? offender : eq;
+  };
+
   // per-equipment alarm colour (highest priority wins)
   const equipAlarm = {};
   for (const a of state?.alarms || []) {
-    const eq = alarmEquipment(a);
+    const eq = alarmEq(a);
     if (eq) equipAlarm[eq] = alarmColorFor(a.priority);
   }
 
   const beaconPositions = [];
   const seen = new Set();
   for (const a of state?.alarms || []) {
-    const eq = alarmEquipment(a);
+    const eq = alarmEq(a);
     if (!eq || seen.has(eq)) continue;
     seen.add(eq);
     const pos = equipmentTop(eq, config, tanksById);
