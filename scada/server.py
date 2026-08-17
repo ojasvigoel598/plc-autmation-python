@@ -15,6 +15,7 @@ system into an impossible state.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -31,12 +32,16 @@ from .runtime import Runtime
 STATIC_DIR = Path(__file__).parent / "static"
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
+logger = logging.getLogger("scada.server")
+
 # Module-level singletons (the server owns one live simulation).
 runtime = Runtime()
 clients: set[WebSocket] = set()
 # Per-client outbound queues decouple the sim loop from slow consumers: a
 # stalled browser must never freeze the plant.
 client_queues: dict[WebSocket, asyncio.Queue] = {}
+# Sender task per client so a dropped client's task can be cancelled.
+client_tasks: dict[WebSocket, asyncio.Task] = {}
 MAX_QUEUE = 128
 loop_task: asyncio.Task | None = None
 
@@ -118,17 +123,22 @@ async def _client_sender(ws: WebSocket, queue: asyncio.Queue) -> None:
     finally:
         clients.discard(ws)
         client_queues.pop(ws, None)
+        client_tasks.pop(ws, None)
 
 
 async def _broadcast(payload: dict) -> None:
-    """Non-blocking fan-out.  Clients that cannot keep up are dropped rather
-    than stalling the simulation loop."""
+    """Non-blocking fan-out.  Clients that cannot keep up are dropped (their
+    sender task cancelled) rather than stalling the simulation loop."""
     for ws, queue in list(client_queues.items()):
         try:
             queue.put_nowait(payload)
         except asyncio.QueueFull:
+            logger.warning("dropping slow WebSocket client (queue full)")
             clients.discard(ws)
             client_queues.pop(ws, None)
+            task = client_tasks.pop(ws, None)
+            if task is not None:
+                task.cancel()
 
 
 async def _sim_loop() -> None:
@@ -136,13 +146,18 @@ async def _sim_loop() -> None:
     next_tick = time.monotonic()
     trend_counter = 0
     while True:
-        snapshot = runtime.step()
-        await _broadcast({"type": "state", "data": snapshot})
+        try:
+            snapshot = runtime.step()
+            await _broadcast({"type": "state", "data": snapshot})
 
-        trend_counter += 1
-        if trend_counter >= 5:
-            trend_counter = 0
-            await _broadcast({"type": "trends", "data": runtime.trends(400)})
+            trend_counter += 1
+            if trend_counter >= 5:
+                trend_counter = 0
+                await _broadcast({"type": "trends", "data": runtime.trends(400)})
+        except Exception:
+            # One bad tick must never silently kill the simulation: log and
+            # continue on the next schedule slot.
+            logger.exception("simulation tick failed; continuing")
 
         next_tick += period
         delay = next_tick - time.monotonic()
@@ -213,6 +228,7 @@ def create_app(start_loop: bool = True) -> FastAPI:
         clients.add(ws)
         client_queues[ws] = queue
         sender = asyncio.create_task(_client_sender(ws, queue))
+        client_tasks[ws] = sender
         # Initial burst so the HMI paints instantly (ordered through the queue).
         await queue.put({"type": "config", "data": runtime.plant_config()})
         await queue.put({"type": "state", "data": runtime.snapshot()})
@@ -227,6 +243,7 @@ def create_app(start_loop: bool = True) -> FastAPI:
             sender.cancel()
             clients.discard(ws)
             client_queues.pop(ws, None)
+            client_tasks.pop(ws, None)
 
     # ---- Operating state commands --------------------------------------
     @app.post("/api/control/start")
