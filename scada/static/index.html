@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Multi-Tank PLC/SCADA Simulator</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">&#9881;</span>
+      <div>
+        <h1>Multi-Tank Cascade &mdash; SCADA</h1>
+        <p class="subtitle">P&middot;101 / TK-101&rarr;103 &middot; LIC-101 / LIC-102</p>
+      </div>
+    </div>
+    <div class="top-status">
+      <div class="stat" id="stat-clock" title="simulation clock">t = 0.0 s</div>
+      <div class="stat" id="stat-state" data-state="IDLE">IDLE</div>
+      <div class="stat" id="stat-estop" data-active="0">E-STOP</div>
+      <div class="stat" id="stat-ws" data-up="0">WS &#9679;</div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ===================== P&ID schematic ===================== -->
+    <section class="panel schematic-panel">
+      <h2>Process Schematic <span class="panel-note">P&amp;ID (not to scale; elevations encoded in z<sub>base</sub>)</span></h2>
+      <svg id="pid" viewBox="0 0 1000 620" role="img" aria-label="Process and instrumentation diagram">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="#8ab4f8"/>
+          </marker>
+          <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#3fa9f5"/>
+            <stop offset="100%" stop-color="#1467c9"/>
+          </linearGradient>
+        </defs>
+
+        <!-- main transfer line -->
+        <line class="pipe" id="pipe-main" x1="110" y1="450" x2="935" y2="450" />
+
+        <!-- reservoir -->
+        <g class="equip">
+          <rect x="30" y="240" width="80" height="150" rx="6" class="vessel"/>
+          <path class="fill" id="fill-res" d="M36,240 h68 v150 h-68 z"/>
+          <line class="pipe" x1="70" y1="390" x2="70" y2="450"/>
+          <line class="pipe" x1="70" y1="450" x2="110" y2="450"/>
+          <text x="70" y="232" class="tag">RESERVOIR</text>
+        </g>
+
+        <!-- pump P-101 -->
+        <g class="equip" id="g-pump">
+          <circle cx="170" cy="450" r="26" class="pump" id="pump-101"/>
+          <text x="170" y="455" class="pump-glyph" id="pump-glyph">P</text>
+          <text x="170" y="495" class="tag">P-101</text>
+          <text x="170" y="512" class="tiny" id="pump-speed">0 %</text>
+        </g>
+
+        <!-- TK-101 -->
+        <g class="equip" id="g-tk101">
+          <line class="pipe" x1="300" y1="450" x2="300" y2="200"/>
+          <line class="pipe" x1="300" y1="440" x2="300" y2="450"/>
+          <rect x="240" y="200" width="120" height="240" rx="4" class="vessel"/>
+          <rect class="fill" id="fill-101" x="246" y="434" width="108" height="0"/>
+          <text x="252" y="226" class="tag">TK-101</text>
+          <text x="252" y="242" class="tiny" id="lv-101">LT-101 &mdash;</text>
+          <circle class="alarm-dot" id="dot-101" cx="348" cy="212" r="6"/>
+          <text x="240" y="196" class="tiny zlabel">z=1.5 m</text>
+        </g>
+
+        <!-- LIC-101 -->
+        <g class="lic" id="lic-101">
+          <rect x="230" y="70" width="140" height="96" rx="6" class="lic-box"/>
+          <text x="300" y="90" class="lic-title" text-anchor="middle">LIC-101</text>
+          <text x="240" y="112" class="lic-line" id="lic101-sp">SP &mdash;</text>
+          <text x="240" y="128" class="lic-line" id="lic101-pv">PV &mdash;</text>
+          <text x="240" y="144" class="lic-line" id="lic101-mv">MV &mdash;</text>
+          <text x="240" y="158" class="lic-mode" id="lic101-mode">AUTO</text>
+          <line class="pipe" x1="300" y1="166" x2="300" y2="200" stroke-dasharray="3 3"/>
+        </g>
+
+        <!-- XV-101 -->
+        <g class="equip" id="g-xv101">
+          <line class="pipe" x1="340" y1="450" x2="380" y2="450"/>
+          <g class="valve" id="valve-101" transform="translate(395,450)">
+            <path d="M-15,-15 L15,15 M-15,15 L15,-15" class="valve-x"/>
+            <polygon points="-18,-15 -18,15 -8,0" class="valve-wing"/>
+            <polygon points="18,-15 18,15 8,0" class="valve-wing"/>
+          </g>
+          <line class="pipe" x1="410" y1="450" x2="450" y2="450"/>
+          <text x="395" y="495" class="tag">XV-101</text>
+          <text x="395" y="512" class="tiny" id="xv101-pos">0 %</text>
+        </g>
+
+        <!-- TK-102 -->
+        <g class="equip" id="g-tk102">
+          <line class="pipe" x1="530" y1="450" x2="530" y2="200"/>
+          <line class="pipe" x1="530" y1="440" x2="530" y2="450"/>
+          <rect x="470" y="200" width="120" height="240" rx="4" class="vessel"/>
+          <rect class="fill" id="fill-102" x="476" y="434" width="108" height="0"/>
+          <text x="482" y="226" class="tag">TK-102</text>
+          <text x="482" y="242" class="tiny" id="lv-102">LT-102 &mdash;</text>
+          <circle class="alarm-dot" id="dot-102" cx="578" cy="212" r="6"/>
+          <text x="470" y="196" class="tiny zlabel">z=1.0 m</text>
+        </g>
+
+        <!-- LIC-102 -->
+        <g class="lic" id="lic-102">
+          <rect x="460" y="70" width="140" height="96" rx="6" class="lic-box"/>
+          <text x="530" y="90" class="lic-title" text-anchor="middle">LIC-102</text>
+          <text x="470" y="112" class="lic-line" id="lic102-sp">SP &mdash;</text>
+          <text x="470" y="128" class="lic-line" id="lic102-pv">PV &mdash;</text>
+          <text x="470" y="144" class="lic-line" id="lic102-mv">MV &mdash;</text>
+          <text x="470" y="158" class="lic-mode" id="lic102-mode">AUTO</text>
+          <line class="pipe" x1="530" y1="166" x2="530" y2="200" stroke-dasharray="3 3"/>
+        </g>
+
+        <!-- XV-102 -->
+        <g class="equip" id="g-xv102">
+          <line class="pipe" x1="570" y1="450" x2="610" y2="450"/>
+          <g class="valve" id="valve-102" transform="translate(625,450)">
+            <path d="M-15,-15 L15,15 M-15,15 L15,-15" class="valve-x"/>
+            <polygon points="-18,-15 -18,15 -8,0" class="valve-wing"/>
+            <polygon points="18,-15 18,15 8,0" class="valve-wing"/>
+          </g>
+          <line class="pipe" x1="640" y1="450" x2="680" y2="450"/>
+          <text x="625" y="495" class="tag">XV-102</text>
+          <text x="625" y="512" class="tiny" id="xv102-pos">0 %</text>
+        </g>
+
+        <!-- TK-103 -->
+        <g class="equip" id="g-tk103">
+          <line class="pipe" x1="760" y1="450" x2="760" y2="200"/>
+          <line class="pipe" x1="760" y1="440" x2="760" y2="450"/>
+          <rect x="700" y="200" width="120" height="240" rx="4" class="vessel"/>
+          <rect class="fill" id="fill-103" x="706" y="434" width="108" height="0"/>
+          <text x="712" y="226" class="tag">TK-103</text>
+          <text x="712" y="242" class="tiny" id="lv-103">LT-103 &mdash;</text>
+          <circle class="alarm-dot" id="dot-103" cx="808" cy="212" r="6"/>
+          <text x="700" y="196" class="tiny zlabel">z=0.5 m</text>
+        </g>
+
+        <!-- XV-103 -->
+        <g class="equip" id="g-xv103">
+          <line class="pipe" x1="800" y1="450" x2="840" y2="450"/>
+          <g class="valve" id="valve-103" transform="translate(855,450)">
+            <path d="M-15,-15 L15,15 M-15,15 L15,-15" class="valve-x"/>
+            <polygon points="-18,-15 -18,15 -8,0" class="valve-wing"/>
+            <polygon points="18,-15 18,15 8,0" class="valve-wing"/>
+          </g>
+          <line class="pipe" x1="870" y1="450" x2="935" y2="450"/>
+          <text x="855" y="495" class="tag">XV-103</text>
+          <text x="855" y="512" class="tiny" id="xv103-pos">0 %</text>
+        </g>
+
+        <!-- drain -->
+        <g class="equip">
+          <line class="pipe" x1="935" y1="450" x2="935" y2="500"/>
+          <path d="M930,500 h10 l-5,-8 z" class="drain-arrow"/>
+          <text x="935" y="520" class="tag" text-anchor="middle">DRAIN</text>
+        </g>
+      </svg>
+      <div class="legend">
+        <span><i class="sw green"></i> running/open</span>
+        <span><i class="sw gray"></i> stopped/closed</span>
+        <span><i class="sw red"></i> fault</span>
+        <span><i class="sw amber"></i> blocked</span>
+      </div>
+    </section>
+
+    <!-- ===================== Live trends ===================== -->
+    <section class="panel trends-panel">
+      <h2>Live Trends <span class="panel-note">rolling window</span></h2>
+      <div class="chart" id="chart-levels">
+        <div class="chart-title">Tank levels (m)</div>
+        <canvas id="cv-levels" height="160"></canvas>
+      </div>
+      <div class="chart" id="chart-lic101">
+        <div class="chart-title">LIC-101 &mdash; TK-101 level loop</div>
+        <canvas id="cv-lic101" height="150"></canvas>
+      </div>
+      <div class="chart" id="chart-lic102">
+        <div class="chart-title">LIC-102 &mdash; TK-102 level loop</div>
+        <canvas id="cv-lic102" height="150"></canvas>
+      </div>
+      <div class="chart" id="chart-flows">
+        <div class="chart-title">Flows (L/s)</div>
+        <canvas id="cv-flows" height="120"></canvas>
+      </div>
+    </section>
+
+    <!-- ===================== Operator controls ===================== -->
+    <section class="panel controls-panel">
+      <h2>Operator Control</h2>
+
+      <div class="op-state">
+        <button class="btn start" id="btn-start">START</button>
+        <button class="btn stop" id="btn-stop">STOP</button>
+        <button class="btn reset" id="btn-reset">RESET</button>
+        <button class="btn estop" id="btn-estop">E-STOP</button>
+        <button class="btn ack" id="btn-ackall">ACK ALL</button>
+      </div>
+
+      <div class="loop-card" data-loop="LIC-101">
+        <div class="loop-head">
+          <span class="loop-tag">LIC-101</span>
+          <span class="loop-desc">TK-101 level &rarr; P-101 speed</span>
+          <button class="mode-btn" id="mode-101">AUTO</button>
+        </div>
+        <div class="loop-grid">
+          <label>Setpoint (m) <input type="number" id="sp-101" step="0.05" min="0" max="2"></label>
+          <label>Kp <input type="number" id="kp-101" step="10" min="0"></label>
+          <label>Ki <input type="number" id="ki-101" step="1" min="0"></label>
+          <label>Kd <input type="number" id="kd-101" step="1" min="0"></label>
+          <label>Manual MV (%) <input type="range" id="mmv-101" min="0" max="100" step="1"><output id="mmv-101-o">0</output></label>
+        </div>
+        <div class="loop-readout" id="readout-101">PV &mdash; &middot; MV &mdash; %</div>
+      </div>
+
+      <div class="loop-card" data-loop="LIC-102">
+        <div class="loop-head">
+          <span class="loop-tag">LIC-102</span>
+          <span class="loop-desc">TK-102 level &rarr; XV-101 opening</span>
+          <button class="mode-btn" id="mode-102">AUTO</button>
+        </div>
+        <div class="loop-grid">
+          <label>Setpoint (m) <input type="number" id="sp-102" step="0.05" min="0" max="2"></label>
+          <label>Kp <input type="number" id="kp-102" step="10" min="0"></label>
+          <label>Ki <input type="number" id="ki-102" step="1" min="0"></label>
+          <label>Kd <input type="number" id="kd-102" step="1" min="0"></label>
+          <label>Manual MV (%) <input type="range" id="mmv-102" min="0" max="100" step="1"><output id="mmv-102-o">0</output></label>
+        </div>
+        <div class="loop-readout" id="readout-102">PV &mdash; &middot; MV &mdash; %</div>
+      </div>
+
+      <div class="valve-card">
+        <div class="loop-head"><span class="loop-tag">XV-102 / XV-103</span><span class="loop-desc">manual transfer / discharge</span></div>
+        <div class="loop-grid">
+          <label>XV-102 (%) <input type="range" id="xv-102" min="0" max="100" step="1"><output id="xv-102-o">50</output></label>
+          <label>XV-103 (%) <input type="range" id="xv-103" min="0" max="100" step="1"><output id="xv-103-o">50</output></label>
+        </div>
+      </div>
+
+      <details class="fault-panel">
+        <summary>Fault injection &amp; disturbances</summary>
+        <div class="fault-grid">
+          <label>LT-101 <select id="f-lt101"><option>OK</option><option>STUCK</option><option>FAIL_HIGH</option><option>FAIL_LOW</option><option>DRIFT</option><option>NAN</option></select></label>
+          <label>LT-102 <select id="f-lt102"><option>OK</option><option>STUCK</option><option>FAIL_HIGH</option><option>FAIL_LOW</option><option>DRIFT</option><option>NAN</option></select></label>
+          <label>LT-103 <select id="f-lt103"><option>OK</option><option>STUCK</option><option>FAIL_HIGH</option><option>FAIL_LOW</option><option>DRIFT</option><option>NAN</option></select></label>
+          <button class="btn small trip" id="f-pump-trip">Pump trip</button>
+          <button class="btn small" id="f-pump-reset">Pump reset</button>
+          <button class="btn small trip" id="f-xv102-stick">Stick XV-102</button>
+          <button class="btn small" id="f-xv102-unstick">Free XV-102</button>
+          <button class="btn small trip" id="f-block">Block XV-102</button>
+          <button class="btn small" id="f-unblock">Clear block</button>
+          <button class="btn small warn" id="f-disturb">Inject disturbance</button>
+        </div>
+      </details>
+    </section>
+
+    <!-- ===================== Alarms & events ===================== -->
+    <section class="panel alarms-panel">
+      <h2>Alarms &amp; Events</h2>
+      <div class="alarm-count" id="alarm-count">0 active</div>
+      <table class="alarm-table">
+        <thead><tr><th>State</th><th>Tag</th><th>Priority</th><th>Message</th><th>Raised</th><th></th></tr></thead>
+        <tbody id="alarm-body"></tbody>
+      </table>
+      <h3 class="event-h">Event history</h3>
+      <div class="event-log" id="event-log"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

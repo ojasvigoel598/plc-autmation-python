@@ -1,105 +1,277 @@
-# 🏭 Open-Source Python PLC Engine & Industrial Water Plant Simulator
+# Multi-Tank PLC / SCADA Process Simulator
 
-## Overview
+A real-time, interactive **three-tank cascade process simulation** with a
+software **PLC engine** (IEC 61131-3 style), **PID level control**, fault
+injection, interlocks, alarms, and a live **SCADA dashboard** with an
+operator control panel.
 
-An open-source industrial automation framework written in Python that replicates the internal behavior of a Programmable Logic Controller (PLC). It simulates scan-cycle execution, discrete I/O mapping, and closed-loop control applied to a dynamic water tank system.
+It is a *working engineering demonstrator*: every control action propagates
+through the whole chain —
 
-The goal is to demonstrate how real industrial automation systems (used in plants, refineries, and infrastructure systems) can be modeled/verified without proprietary PLC hardware.
+```
+plant -> sensors -> PLC input image -> control program -> PID -> output image
+      -> actuators -> process response -> sensors -> ...
+```
 
-Unlike rigid open-source soft-PLCs like openPLC that are confined strictly to logical execution, this Python-based environment allows engineers to embed continuous physics equations directly alongside control logic to evaluate immediate physical system impacts adn take in account of hydraulics . For example, a standard open-source PLC cannot natively solve the ordinary differential equations governing fluid dynamics or automatically generate real-time engineering graphs of a pipeline blowout caused by water hammer.
+Nothing is cosmetic. Changing a setpoint, valve, PID gain, or injecting a
+fault genuinely changes the simulated physics, the controller behaviour, and
+what the dashboard shows.
 
----
-
-## 💡 Problem Statement
-
-Industrial systems such as water treatment plants and chemical processing units require:
-
-- Real-time control of fluid levels  
-- High reliability and safety interlocks  
-- Deterministic execution cycles  
-
-Traditionally, this requires expensive proprietary PLC systems (Siemens, Allen-Bradley), making experimentation and learning difficult.
-
----
-
-## ✅ Solution
-
-This project implements a **software-based PLC engine** that simulates:
-
-- IEC-style scan cycle execution  
-- Digital input/output mapping (`I0.x`, `Q0.x`, `M0.x`)  
-- SR flip-flops and timer blocks (TON/TOF)  
-- Closed-loop feedback control  
-- Fault injection and safety shutdown logic  
-
-It applies these concepts to a real-time **water tank automation system**.
+![Demo response](docs/demo_response.png)
 
 ---
 
-## ⚙️ Why Python?
+## 1. What problem does it solve?
 
-| Reason | Benefit |
-|--------|---------|
-| Rapid prototyping | Test PLC logic instantly |
-| Visualization | Real-time system graphs |
-| Debugging | Easy inspection of logic states |
-| Zero cost | No PLC hardware required |
-| Portability | Runs on any system with Python |
+Industrial plants need deterministic, safe, closed-loop control of fluid
+levels.  Learning on real hardware (Siemens, Allen-Bradley, Emerson) is
+expensive and risky.  This project reproduces the *control and safety
+behaviour* of a PLC in Python and couples it to a *physically consistent*
+process model, so the whole plant can be operated, faulted and recovered in a
+browser.
 
----
+The repository began as a matplotlib-only, single-tank demo (the `main.py`
+modules remain under `simulation.py`, `controllers.py`, etc.).  This rewrite
+adds a genuine multi-tank plant, real PID controllers, an IEC 61131-3 PLC
+engine, and a live web SCADA layer in the `scada/` package.
 
-## 🏗️ System Architecture
+## 2. System architecture
 
-A real PLC operates in a deterministic scan cycle. This project replicates that behavior:
+```
+                       +--------------------------------------------------+
+   Operator web UI  <->|  FastAPI backend (REST control + WebSocket data) |
+                       +------------------------+-------------------------+
+                                                |  one scan cycle / 100 ms
+                                                v
+                       +--------------------------------------------------+
+                       |                  RUNTIME (field bus)             |
+                       |  field sensors -> PLC image -> program -> outputs|
+                       |  -> actuators (faults applied) -> plant physics  |
+                       +-------------+----------------------+-------------+
+                                     |                      |
+                            +--------v-------+     +--------v--------+
+                            |   PLC engine   |     |  Process model  |
+                            | (IEC 61131-3)  |     | 3 tanks, pumps, |
+                            | PID, interlocks|     | valves, RK4 ODE |
+                            +----------------+     +-----------------+
+```
 
-### 1. Input Scan
-- Reads analog tank level
-- Converts to digital sensors (`I0.0`, `I0.2`, etc.)
+### The plant
 
-### 2. Logic Execution
-- Runs ladder logic simulation
-- Uses SR flip-flops and timers
+```
+[reservoir] --P-101--> TK-101 --XV-101--> TK-102 --XV-102--> TK-103 --XV-103--> drain
+                       (LIC-101)          (LIC-102)
+```
 
-### 3. Output Update
-- Updates actuator signals (`Q0.0` pump)
+| Tag | Device | Role |
+|-----|--------|------|
+| P-101 | variable-speed pump | reservoir &rarr; TK-101 |
+| XV-101 | motorised transfer valve | TK-101 &rarr; TK-102 (PID-manipulated) |
+| XV-102 | motorised transfer valve | TK-102 &rarr; TK-103 (operator) |
+| XV-103 | motorised discharge valve | TK-103 &rarr; drain (operator) |
+| LT-101/2/3 | level transmitters | tank level &rarr; controller/HMI |
+| LIC-101 | level controller | PV = TK-101, MV = P-101 speed |
+| LIC-102 | level controller | PV = TK-102, MV = XV-101 opening |
 
-### 4. Physical Plant Simulation
-- Applies fluid dynamics (tank fill/drain)
-## project structure
-│
-├── main.py
-├── simulation.py
-├── plc_logic.py
-├── controllers.py
-├── config.py
-├── plc_advanced_module.py
-│
-├── results (graph)
-## Key Features
-IEC 61131-3 style PLC simulation
-Closed-loop feedback control system
-Industrial sensor abstraction layer
-Fault injection and safety logic
-SCADA-style visualization outputs
-## Future Improvements
-Real-time SCADA dashboard (live UI)
-Multi-tank system simulation
-PID controller integration
-Web-based control panel
-## License
+## 3. Process model
 
-Open-source project (MIT License recommended)
+Each tank is a volume integrator (conservation of mass):
 
+```
+A_i * dh_i/dt = sum(Q_in) - sum(Q_out) - Q_leak
+```
 
----
+* **Valve flow** — sharp-edged orifice equation
+  `Q = u * Cd * Ao * sqrt(2 g dh)`, with `dh` the hydraulic head between the
+  two nodes (including each tank's base elevation `z_base`).  Flow is zero
+  against an adverse head.
+* **Pump flow** — lightly drooping centrifugal characteristic
+  `Q = u * Q_max * (1 - DROOP * head)`.
+* **Actuator travel** — motorised valves and the pump slew toward their
+  commanded position at a finite rate (modelling real valve stroke time).
+* **Overflow** — any level above tank height over-tops to drain and is
+  reported as overflow flow.
 
-## 🚀 Getting Started
+Units are SI throughout (metres, m&sup3;/s); the HMI presents flow in L/s.
+All constants are in `scada/config.py`.
 
-### Prerequisites
+## 4. PLC / control architecture
+
+The PLC is pure control logic operating on I/O **image tables**, following
+the classic scan cycle:
+
+1. **Input scan** — latch transmitter readings and feedback into `AI` / `I`.
+2. **Program scan** — execute networks in order.
+3. **Output update** — write `AQ` / `Q` to the field.
+
+The runtime copies sensor readings into the input image before each scan and
+applies the output image to the plant afterwards — the PLC cannot see its own
+outputs change until the next scan.
+
+Implemented IEC 61131-3 function blocks: `TON`, `TOF`, `TP`, `CTU`, `CTD`,
+`SR`, `RS`, `R_TRIG`, `F_TRIG` (see `scada/plc.py`).
+
+The control program implements, in order:
+
+* sensor plausibility detection (NaN / implausible slew-rate),
+* HIHI / HI / LO level alarms,
+* an **ISA-88 / PackML operating state machine**
+  (`IDLE -> STARTING -> RUNNING -> STOPPING -> IDLE`, with `FAULTED` and
+  `E_STOPPED`),
+* two PID loops,
+* interlocks and permissives.
+
+### Interlocks & permissives
+
+* **E-stop** has highest authority: pump stopped, all valves closed.
+* **High-high level** trips the feed into that tank.
+* **Pump trip** (run feedback lost while commanded) latches and forces
+  `FAULTED`.
+* **Valve travel fault** (command/feedback deviation) latches and forces
+  `FAULTED`.
+* **Sensor fault** fails the affected loop to a safe manual output (0 %).
+
+Faults are **latched** until the operator resets them, mirroring real safety
+systems.
+
+## 5. PID implementation
+
+`scada/pid.py` implements the parallel (ISA) form:
+
+```
+u = Kp*e + Ki*integral(e) + Kd*d(e)/dt
+```
+
+with the engineering features required for real level loops:
+
+* **derivative on measurement** (no derivative kick on setpoint changes),
+  with a first-order filter to reject noise,
+* **integral anti-windup** by back-calculation while the output saturates,
+* **bumpless manual/auto transfer** (the integrator is re-initialised so the
+  output is continuous),
+* **output limits** (0&ndash;100 %),
+* **direct/reverse acting** selection.
+
+Gains were tuned empirically (see `tests/test_control_loop.py`): a 0.2 m
+setpoint step settles in ~30 s with ~20 % overshoot (the valve saturates, as
+a real actuator would) and **zero steady-state error**.
+
+## 6. Simulation & numerical method
+
+Four rates are explicitly separated:
+
+| Rate | Period | Purpose |
+|------|--------|---------|
+| Process integration | 10 ms | RK4 sub-step for the plant ODE |
+| PLC scan / control | 100 ms | input scan, program, PID, outputs |
+| Sensor update | 100 ms | transmitter sampling (with noise) |
+| UI refresh | 100 ms | WebSocket push to SCADA clients |
+
+The plant ODE is integrated with **classical RK4** at a fixed sub-step.
+Rationale: the process time constants are tens of seconds, so even explicit
+Euler at 10 Hz would be *stable*; RK4 is chosen for **accuracy and
+robustness** against the `sqrt(h)` nonlinearities and step-like
+disturbances, keeping the mass balance tight for negligible cost.  A fixed
+step (rather than scipy's adaptive RK45) keeps the run deterministic and the
+rate separation clean.  A mass-balance check is part of the test suite.
+
+## 7. SCADA dashboard & control panel
+
+The frontend is a single-page, dependency-free (no CDN, no build step) HMI:
+
+* **P&ID schematic** — tanks with live fill levels, pump, valves, flow
+  direction animation, controller faceplates, alarm dots, elevation labels.
+* **Live trends** — tank levels, both loops (SP/PV/MV), and flows, on a
+  rolling window.
+* **Operator panel** — start/stop/reset/E-stop/ack, per-loop
+  AUTO/MANUAL, setpoint and Kp/Ki/Kd, manual MV, valve positions, and fault
+  injection.
+* **Alarms & events** — priority-coded active alarm table with ACK, plus an
+  event history.
+
+Every control is validated server-side (range/type/mode checks), so the UI
+cannot drive an impossible state.  Colour is never the only state signal:
+state is also shown as text/badges.
+
+## 8. Install & run
+
+Requires Python 3.10+.
 
 ```bash
-pip install numpy matplotlib
+pip install -r requirements.txt          # runtime
+pip install -r requirements-dev.txt      # + pytest/httpx for tests
+python run_scada.py                      # http://127.0.0.1:8000
+```
 
-git clone https://github.com/YOUR_USERNAME/plc-water-tank-automation.git
-cd plc-water-tank-automation
-python main.py
+`run_scada.py --speed 2.0` runs the simulation twice as fast as wall-clock
+(useful for demos).
+
+## 9. Operating the simulation
+
+1. Open the dashboard and press **START**. The plant goes
+   `STARTING -> RUNNING` and the PIDs bring TK-101/TK-102 to their
+   setpoints.
+2. Change a **setpoint** and watch the level track it; watch MV move on the
+   trend.
+3. Move **XV-102 / XV-103** (throughput) or press **Inject disturbance** to
+   see disturbance rejection.
+4. Toggle a loop to **MANUAL** and drive the actuator directly; switch back
+   to AUTO — the transfer is bumpless.
+5. Inject a **fault** (pump trip, stuck valve, sensor failure, blocked
+   outlet), observe the alarm, interlock and safe state, then reset.
+
+### Example scenario (end-to-end)
+
+```
+start -> RUNNING (levels held at SP)
+setpoint step 0.8 -> 1.0 m   -> PID opens XV-101, TK-102 rises
+disturbance (leak)           -> level dips, MV saturates to compensate
+recovery                     -> level returns to SP
+E-stop                       -> E_STOPPED, pump off, alarm latched
+reset + restart              -> normal operation resumes
+pump trip                    -> FAULTED, P-101_TRIP alarm, safe state
+field reset + PLC reset      -> IDLE, ready to restart
+```
+
+## 10. Testing
+
+```bash
+python -m pytest tests/ -q
+```
+
+Coverage: orifice physics and mass balance, overflow/empty-tank limits,
+valve slew, PID (proportional, reverse-acting, anti-windup, derivative-on-
+measurement, bumpless transfer), IEC 61131-3 function blocks, alarm
+ack/clear, the operating state machine, E-stop authority, sensor fault
+latching, HIHI interlock, setpoint tracking, disturbance rejection, pump-trip
+safe state, valve-stuck detection, and the REST API (including validation).
+
+## 11. Engineering limitations (simulated vs. real hardware)
+
+This is an educational simulation, **not** a certified PLC or plant model.
+
+* The "PLC" is a single-threaded Python scan loop, not IEC 61131-3 runtime
+  with deterministic task scheduling.
+* Fluids are ideal and incompressible; the orifice/pump equations are
+  lumped-parameter approximations (no water hammer, no valve Cv curves, no
+  temperature/viscosity effects).
+* Transmitters, actuator faults and run feedback are simplified models of
+  real field devices.
+* No OPC UA / Modbus communication to a real PLC.
+
+`PLC2Skill` (an ontology tool for mapping IEC 61131-3 code to skill models)
+was evaluated and is **not used** here: it targets real PLCopen XML / OPC UA
+projects, not runtime simulation.  Its ISA-88 skill state-machine idea is
+reflected in the operating-state machine above.
+
+## 12. Future improvements
+
+* Cascade or feed-forward control, gain scheduling.
+* OPC UA / Modbus TCP gateway to a real PLC or SCADA historian.
+* More unit operations (heat exchanger, pressure loop).
+* Packaged as a Docker image.
+* Persist trends/alarms to a time-series database.
+
+## License
+
+MIT (see `LICENSE`).

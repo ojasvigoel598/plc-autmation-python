@@ -39,6 +39,8 @@ env/
 *.png
 *.jpg
 *.pdf
+!docs/*.png
+!docs/*.gif
 
 # Project specific
 .pytest_cache/
@@ -50,3 +52,8 @@ __pycache__/
 *.pyc
 .vscode
 plcpython.py
+
+# SCADA simulator runtime
+results/
+*.log
+_server.log

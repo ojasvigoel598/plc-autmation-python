@@ -1,2 +1,7 @@
-matplotlib>=3.5.0
+# Runtime dependencies
 numpy>=1.20.0
+matplotlib>=3.5.0        # legacy CLI modules (main.py)
+fastapi>=0.115
+uvicorn>=0.30
+pydantic>=2.5
+websockets>=12.0
