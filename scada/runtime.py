@@ -300,6 +300,8 @@ class Runtime:
             "loop_mode": plc.loop_mode,
             "manual_pump": plc.manual_pump,
             "sensors": sensors,
+            "sensor_readings": {f"LT-{n}": plc.ai.get(f"LT-{n}", 0.0)
+                                for n in (101, 102, 103)},
             "faults": faults,
             "leaks": {
                 "injected": dict(self.leaks),
