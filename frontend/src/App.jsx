@@ -1,7 +1,36 @@
-import React, { Component, useMemo, useState } from "react";
+import React, { Component, useEffect, useMemo, useState } from "react";
 import { useSimulation, interlockReason } from "./sim.js";
 import PlantScene from "./PlantScene.jsx";
 import TrendChart from "./TrendChart.jsx";
+import LeakView from "./LeakView.jsx";
+
+/* Minimal client-side router.  The SPA is mounted at BASE_URL (/app/ in
+   production, / in dev); routes are expressed relative to that base. */
+function useRoute() {
+  const getRel = () => {
+    const base = import.meta.env.BASE_URL;
+    let p = window.location.pathname;
+    if (base !== "/") {
+      const b = base.endsWith("/") ? base : base + "/";
+      if (p === base || p === b) return "/";
+      if (p.startsWith(b)) return "/" + p.slice(b.length);
+    }
+    return p || "/";
+  };
+  const [route, setRoute] = useState(getRel);
+  useEffect(() => {
+    const onPop = () => setRoute(getRel());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  const navigate = (to) => {
+    const base = import.meta.env.BASE_URL;
+    const b = base.endsWith("/") ? base : base + "/";
+    window.history.pushState({}, "", b + to.replace(/^\//, ""));
+    setRoute(to.startsWith("/") ? to : "/" + to);
+  };
+  return { route, navigate };
+}
 
 /* Keeps a single panel's failure from blanking the whole HMI. */
 class ErrorBoundary extends Component {
@@ -159,9 +188,10 @@ function TankInspector({ tag, state, config }) {
 /* ============================================================ */
 /* Top bar                                                       */
 /* ============================================================ */
-function TopBar({ connected, state, t, scan }) {
+function TopBar({ connected, state, t, scan, onLeaks }) {
   const plc = state?.state || "IDLE";
   const hasAlarm = (state?.alarms || []).some((a) => a.state === "ACTIVE");
+  const hasLeak = state?.leaks?.active && Object.keys(state.leaks.active).length > 0;
   return (
     <header className="topbar">
       <div className="brand">
@@ -171,6 +201,9 @@ function TopBar({ connected, state, t, scan }) {
           <p className="sub">3-tank cascade · ISA-88 state machine · IEC 61131-3 · RK4 process model</p>
         </div>
       </div>
+      <button className={`btn small ${hasLeak ? "danger" : ""}`} onClick={onLeaks}>
+        💧 LEAKS
+      </button>
       <span className={`chip ${connected ? "ok" : "bad"}`}>
         {connected ? "● LINK OK" : "○ RECONNECTING…"}
       </span>
@@ -599,15 +632,20 @@ function Faults({ state, send }) {
 /* ============================================================ */
 export default function App() {
   const { config, state, trends, connected, sendCommand } = useSimulation();
+  const { route, navigate } = useRoute();
   const [tab, setTab] = useState("Overview");
   const [selected, setSelected] = useState(null);
   const send = useMemo(() => sendCommand, [sendCommand]);
 
   const estop = !!state?.estop;
 
+  if (route.startsWith("/leaks")) {
+    return <LeakView route={route} navigate={navigate} />;
+  }
+
   return (
     <div className="app">
-      <TopBar connected={connected} state={state} t={state?.t} scan={state?.scan_count} />
+      <TopBar connected={connected} state={state} t={state?.t} scan={state?.scan_count} onLeaks={() => navigate("/leaks")} />
       <div className="main">
         <div className="viewport">
           {estop && <div className="banner">⚠ EMERGENCY STOP ACTIVE</div>}

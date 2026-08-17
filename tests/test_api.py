@@ -105,6 +105,15 @@ def test_invalid_tag_rejected():
         assert r.status_code == 422
 
 
+def test_spa_fallback_serves_shell():
+    with make_client() as client:
+        # Client-side routes must return the SPA shell so refresh works.
+        for path in ("/app/leaks", "/app/leaks/latest", "/app/leaks/abc123"):
+            r = client.get(path)
+            assert r.status_code == 200
+            assert "text/html" in r.headers["content-type"]
+
+
 def test_plant_config_endpoint():
     with make_client() as client:
         r = client.get("/api/plant_config")

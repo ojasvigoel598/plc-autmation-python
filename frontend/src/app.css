@@ -194,6 +194,23 @@ table.alarm th { color: var(--dim); font-weight: 600; text-transform: uppercase;
 .history { max-height: 160px; overflow-y: auto; font-family: var(--mono); font-size: 11px; color: var(--dim); background: #0b0f15; border: 1px solid var(--border); border-radius: 4px; padding: 7px; }
 .history div { padding: 2px 0; border-bottom: 1px dashed #1c2430; }
 
+/* ---------------- leak investigation ---------------- */
+.leak-page { flex: 1 1 auto; overflow-y: auto; padding: 14px; }
+.leak-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--panel); margin-bottom: 10px; }
+.leak-card.prominent { border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset; }
+.leak-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.leak-id { font-family: var(--mono); color: var(--blue); font-weight: 700; }
+.leak-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+.leak-grid .ins-row { grid-template-columns: 130px 1fr auto; }
+.sev { padding: 1px 8px; border-radius: 3px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.sev-LOW { background: #1a2432; color: var(--amber); }
+.sev-MODERATE { background: #33250f; color: var(--amber-bright); }
+.sev-HIGH { background: #3a1210; color: var(--red-bright); }
+.badge.RESOLVED { background: #101820; color: var(--green-bright); }
+tr.leak-row { cursor: pointer; }
+tr.leak-row:hover { background: var(--panel-2); }
+.leak-facts { margin-top: 10px; color: var(--dim); font-size: 11px; border-top: 1px dashed var(--border); padding-top: 8px; }
+
 /* ---------------- trends ---------------- */
 .trend-chart { margin-bottom: 12px; }
 .tc-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }

@@ -156,10 +156,20 @@ def create_app(start_loop: bool = True) -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     # Serve the built React 3D digital twin (npm run build -> frontend/dist)
-    # at /app.  Falls back to the legacy 2D P&ID dashboard at / when absent.
+    # at /app.  Hashed assets are served from /app/assets; any other /app path
+    # returns the SPA shell so client-side routes (/app/leaks, /app/leaks/latest,
+    # /app/leaks/{id}) survive a page refresh.  The legacy 2D P&ID dashboard
+    # stays at / when the dist is absent.
     if FRONTEND_DIST.exists():
-        app.mount("/app", StaticFiles(directory=str(FRONTEND_DIST), html=True),
-                  name="app3d")
+        app.mount("/app/assets",
+                  StaticFiles(directory=str(FRONTEND_DIST / "assets")),
+                  name="app3d_assets")
+
+        @app.get("/app", include_in_schema=False)
+        @app.get("/app/", include_in_schema=False)
+        @app.get("/app/{path:path}", include_in_schema=False)
+        async def app_spa(path: str = "") -> FileResponse:
+            return FileResponse(str(FRONTEND_DIST / "index.html"))
 
     @app.get("/")
     async def index() -> FileResponse:
