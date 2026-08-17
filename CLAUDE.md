@@ -124,8 +124,10 @@ intermittent/race issues.
   hard-code tag/position maps in JSX when the config already provides them.
 - **Build before release.** `npm run build` must succeed (Vite) and the
   output is served by FastAPI at `/app` (asset base is `/app/`).
+- **`frontend/dist/` is committed** so the twin runs without Node for end
+  users; always rebuild and re-commit it after any `frontend/src` change.
 - Frontend deps live in `frontend/package.json`; no CDN, no global three.js
-  script tag.  `frontend/node_modules/`, `frontend/dist/`, and `/tools/` are
+  script tag.  `frontend/node_modules/` and `/tools/` (portable Node) are
   gitignored.
 
 ## Dependencies

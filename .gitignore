@@ -60,7 +60,11 @@ _server.log
 
 # 3D digital twin (React + Three.js)
 frontend/node_modules/
-frontend/dist/
+# frontend/dist/ is COMMITTED on purpose so the 3D twin runs without a Node
+# toolchain. Rebuild it after any frontend source change: npm run build.
+# (Un-ignore it here — the generic `dist/` rule above would otherwise hide it.)
+!frontend/dist/
+!frontend/dist/**
 
 # Portable Node toolchain used for the frontend build
 /tools/
