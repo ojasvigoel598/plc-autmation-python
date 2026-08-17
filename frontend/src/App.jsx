@@ -1,4 +1,4 @@
-import React, { Component, useEffect, useMemo, useState } from "react";
+import React, { Component, useEffect, useMemo, useRef, useState } from "react";
 import { useSimulation, interlockReason } from "./sim.js";
 import PlantScene from "./PlantScene.jsx";
 import TrendChart from "./TrendChart.jsx";
@@ -32,6 +32,8 @@ function useRoute() {
   };
   return { route, navigate };
 }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* Keeps a single panel's failure from blanking the whole HMI. */
 class ErrorBoundary extends Component {
@@ -345,7 +347,7 @@ function LoopFaceplate({ tag, pid, mode, disabled, send, config }) {
   );
 }
 
-function Controls({ config, state, send }) {
+function Controls({ config, state, send, demo, runDemo, cancelDemo }) {
   const running = state?.state === "RUNNING" || state?.state === "STARTING";
   const plc = state?.state;
   const estop = !!state?.estop;
@@ -359,6 +361,18 @@ function Controls({ config, state, send }) {
 
   return (
     <div>
+      <div className="panel">
+        <h3>Auto-demo</h3>
+        <div className="row">
+          <button className="btn start" disabled={demo.running} onClick={runDemo}>▶ RUN AUTO-DEMO</button>
+          <button className="btn stop" disabled={!demo.running} onClick={cancelDemo}>■ STOP</button>
+        </div>
+        {demo.running && <div className="override">Now: {demo.step}</div>}
+        {!demo.running && demo.step === "Demo complete" && (
+          <div className="override">✔ Demo complete — plant is reset and ready.</div>
+        )}
+      </div>
+
       <div className="panel">
         <h3>Plant commands</h3>
         <div className="row">
@@ -638,6 +652,41 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const send = useMemo(() => sendCommand, [sendCommand]);
 
+  // Auto-demo: every action goes through REST so the PLC still decides what
+  // is actually permitted at each step (rejections are expected in-demo).
+  const demoRef = useRef({ running: false });
+  const [demo, setDemo] = useState({ running: false, step: "" });
+  const DEMO_SEQUENCE = [
+    { label: "Release E-stop and reset to IDLE", action: async () => { await send("/api/control/estop", { active: false }); await send("/api/control/reset"); }, delay: 1200 },
+    { label: "START plant → STARTING → RUNNING", action: () => send("/api/control/start"), delay: 8000 },
+    { label: "Setpoint step: LIC-101 1.00 → 1.10 m", action: () => send("/api/control/setpoint", { tag: "LIC-101", value: 1.1 }), delay: 10000 },
+    { label: "Inject disturbance: TK-102 leak 5 L/s (20 s)", action: () => send("/api/faults/disturbance", { tank: "TK-102", flow_m3s: 0.005, duration: 20 }), delay: 8000 },
+    { label: "Fault: trip P-101 (run feedback lost)", action: () => send("/api/faults/pump/trip"), delay: 5000 },
+    { label: "Recovery: reset pump fault + PLC", action: async () => { await send("/api/faults/pump/reset"); await send("/api/control/reset"); }, delay: 2000 },
+    { label: "Restart and stabilise", action: () => send("/api/control/start"), delay: 8000 },
+    { label: "Emergency stop", action: () => send("/api/control/estop", { active: true }), delay: 2000 },
+    { label: "Release E-stop and reset", action: async () => { await send("/api/control/estop", { active: false }); await send("/api/control/reset"); }, delay: 800 },
+    { label: "Demo complete", action: null, delay: 0 },
+  ];
+  const runDemo = async () => {
+    demoRef.current.running = true;
+    setDemo({ running: true, step: "Preparing…" });
+    for (const s of DEMO_SEQUENCE) {
+      if (!demoRef.current.running) break;
+      setDemo({ running: true, step: s.label });
+      if (s.action) {
+        try { await s.action(); } catch (e) { /* rejected commands are expected */ }
+      }
+      if (s.delay) await sleep(s.delay);
+    }
+    demoRef.current.running = false;
+    setDemo({ running: false, step: "Demo complete" });
+  };
+  const cancelDemo = () => {
+    demoRef.current.running = false;
+    setDemo({ running: false, step: "Cancelled" });
+  };
+
   const estop = !!state?.estop;
 
   if (route.startsWith("/leaks")) {
@@ -670,7 +719,10 @@ export default function App() {
                 <Overview config={config} state={state} selected={selected} onSelect={setSelected} />
               )}
               {tab === "PLC" && <PlcView state={state} />}
-              {tab === "Controls" && <Controls config={config} state={state} send={send} />}
+              {tab === "Controls" && (
+                <Controls config={config} state={state} send={send}
+                  demo={demo} runDemo={runDemo} cancelDemo={cancelDemo} />
+              )}
               {tab === "Alarms" && <Alarms state={state} send={send} />}
               {tab === "Trends" && <Trends trends={trends} />}
               {tab === "Faults" && <Faults state={state} send={send} />}
