@@ -34,6 +34,10 @@ FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 # Module-level singletons (the server owns one live simulation).
 runtime = Runtime()
 clients: set[WebSocket] = set()
+# Per-client outbound queues decouple the sim loop from slow consumers: a
+# stalled browser must never freeze the plant.
+client_queues: dict[WebSocket, asyncio.Queue] = {}
+MAX_QUEUE = 128
 loop_task: asyncio.Task | None = None
 
 
@@ -102,15 +106,29 @@ class LeakRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Simulation loop
 # ---------------------------------------------------------------------------
-async def _broadcast(payload: dict) -> None:
-    dead: list[WebSocket] = []
-    for ws in list(clients):
-        try:
+async def _client_sender(ws: WebSocket, queue: asyncio.Queue) -> None:
+    """Drain one client's outbound queue.  Runs as its own task so a slow or
+    dead client only backs up its own queue, never the sim loop."""
+    try:
+        while True:
+            payload = await queue.get()
             await ws.send_json(payload)
-        except Exception:
-            dead.append(ws)
-    for ws in dead:
+    except Exception:
+        pass
+    finally:
         clients.discard(ws)
+        client_queues.pop(ws, None)
+
+
+async def _broadcast(payload: dict) -> None:
+    """Non-blocking fan-out.  Clients that cannot keep up are dropped rather
+    than stalling the simulation loop."""
+    for ws, queue in list(client_queues.items()):
+        try:
+            queue.put_nowait(payload)
+        except asyncio.QueueFull:
+            clients.discard(ws)
+            client_queues.pop(ws, None)
 
 
 async def _sim_loop() -> None:
@@ -191,19 +209,24 @@ def create_app(start_loop: bool = True) -> FastAPI:
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
         await ws.accept()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=MAX_QUEUE)
         clients.add(ws)
+        client_queues[ws] = queue
+        sender = asyncio.create_task(_client_sender(ws, queue))
+        # Initial burst so the HMI paints instantly (ordered through the queue).
+        await queue.put({"type": "config", "data": runtime.plant_config()})
+        await queue.put({"type": "state", "data": runtime.snapshot()})
+        await queue.put({"type": "trends", "data": runtime.trends(400)})
         try:
-            # Send config + an immediate snapshot so the HMI paints instantly.
-            await ws.send_json({"type": "config", "data": runtime.plant_config()})
-            await ws.send_json({"type": "state", "data": runtime.snapshot()})
-            await ws.send_json({"type": "trends", "data": runtime.trends(400)})
             while True:
                 # Keep the connection alive; pushes come from the sim loop.
                 await ws.receive_text()
         except WebSocketDisconnect:
             pass
         finally:
+            sender.cancel()
             clients.discard(ws)
+            client_queues.pop(ws, None)
 
     # ---- Operating state commands --------------------------------------
     @app.post("/api/control/start")
