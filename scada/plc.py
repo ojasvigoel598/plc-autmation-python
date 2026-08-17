@@ -638,6 +638,15 @@ class PLC:
             "i": dict(self.i),
             "aq": dict(self.aq),
             "q": dict(self.q),
+            "interlocks": {
+                "estop": self.i["I0.0_ESTOP"],
+                "pump_trip": self._trip_latch.q,
+                "valve_fault": self._valve_fault_latch.q,
+                "hihi": {f"TK-{n}": (self.ai.get(f"LT-{n}", 0.0) / config.TANK_HEIGHT) >= config.LEVEL_HIHI
+                         for n in (101, 102, 103)},
+                "sensor_fault": {f"LT-{n}": self._sensor_fault_latch[f"LT-{n}"].q
+                                 for n in (101, 102, 103)},
+            },
             "loop_mode": dict(self.loop_mode),
             "manual_valves": dict(self.manual_valves),
             "manual_pump": self.manual_pump,

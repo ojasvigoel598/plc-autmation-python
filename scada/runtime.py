@@ -15,6 +15,7 @@ tool or a physical failure) and observed by the PLC through its I/O image.
 
 from __future__ import annotations
 
+import math
 import time
 from collections import deque
 
@@ -198,6 +199,7 @@ class Runtime:
             "disturbance_active": plant.t < self._disturbance_until,
         }
 
+        exp = plc.export()
         return {
             "t": plant.t,
             "state": plc.state,
@@ -220,15 +222,62 @@ class Runtime:
                 }
                 for tag in ("XV-101", "XV-102", "XV-103")
             },
-            "pids": plc.export()["pids"],
+            "pids": exp["pids"],
             "loop_mode": plc.loop_mode,
             "manual_pump": plc.manual_pump,
             "sensors": sensors,
             "faults": faults,
-            "alarms": plc.export()["alarms"],
-            "alarm_history": plc.export()["alarm_history"],
+            "alarms": exp["alarms"],
+            "alarm_history": exp["alarm_history"],
+            "interlocks": exp["interlocks"],
             "coils": plc.q,
             "scan_count": plc.scan_count,
+        }
+
+    def plant_config(self) -> dict:
+        """Static plant topology + 3D layout, for a config-driven frontend."""
+        tanks = []
+        for tag, spec in config.TANKS.items():
+            pos = config.LAYOUT.get(tag, {})
+            tanks.append({
+                "tag": tag,
+                "area": spec["area"],
+                "height": spec["height"],
+                "z_base": spec["z_base"],
+                "radius": round(math.sqrt(spec["area"] / math.pi), 4),
+                "x": pos.get("x", 0.0),
+                "z": pos.get("z", 0.0),
+            })
+        valves = []
+        for tag, spec in config.VALVES.items():
+            pos = config.LAYOUT.get(tag, {})
+            valves.append({
+                "tag": tag,
+                "upstream": spec["upstream"],
+                "downstream": spec["downstream"],
+                "kv": spec["kv"],
+                "x": pos.get("x", 0.0),
+                "y": pos.get("y", 0.0),
+                "z": pos.get("z", 0.0),
+            })
+        loops = [
+            {"tag": tag, "pv_tag": spec["pv_tag"], "mv_tag": spec["mv_tag"],
+             "setpoint": spec["setpoint"], "kp": spec["kp"], "ki": spec["ki"],
+             "kd": spec["kd"]}
+            for tag, spec in config.PID_LOOPS.items()
+        ]
+        return {
+            "tank_height": config.TANK_HEIGHT,
+            "tanks": tanks,
+            "valves": valves,
+            "pump": {"tag": "P-101", "max_flow": config.PUMP_MAX_FLOW,
+                     "upstream": "reservoir", "downstream": "TK-101",
+                     **config.LAYOUT.get("P-101", {})},
+            "reservoir": config.LAYOUT.get("reservoir", {}),
+            "drain": config.LAYOUT.get("drain", {}),
+            "loops": loops,
+            "rates": {"process": config.PROCESS_DT, "plc_scan": config.PLC_SCAN_DT,
+                      "ui": config.UI_REFRESH_DT},
         }
 
     def trends(self, max_points: int = 400) -> dict:

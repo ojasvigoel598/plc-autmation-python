@@ -83,6 +83,19 @@ def test_no_sustained_oscillation(settled):
     assert max(samples) - min(samples) < 0.03   # no limit cycle
 
 
+def test_snapshot_includes_interlocks(settled):
+    rt = settled
+    s = rt.snapshot()
+    assert "interlocks" in s
+    assert s["interlocks"]["estop"] is False
+    assert s["interlocks"]["pump_trip"] is False
+    assert s["interlocks"]["hihi"]["TK-101"] is False
+    rt.plc.set_estop(True)
+    rt.step()
+    s2 = rt.snapshot()
+    assert s2["interlocks"]["estop"] is True
+
+
 def test_mass_balance_over_full_run():
     rt = Runtime()
     rt.plc.pulse_start()

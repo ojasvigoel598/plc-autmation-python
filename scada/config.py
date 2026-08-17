@@ -137,3 +137,24 @@ SENSOR_MAX_DEVIATION = 0.20  # m : transmitter vs. redundant trend check
 # History / trending
 # ---------------------------------------------------------------------------
 TREND_HORIZON = 600.0   # seconds of history retained for the live trends
+
+
+# ---------------------------------------------------------------------------
+# 3D scene layout (visualisation metadata, world units = metres)
+# ---------------------------------------------------------------------------
+# Positions the equipment in the 3D digital twin.  Tanks sit at y = z_base
+# (so the cascade descends left-to-right); valves sit on the sloped transfer
+# pipe between their upstream and downstream tanks; the pump lifts from the
+# reservoir up to TK-101.  The frontend reads these positions, so the scene
+# adapts if the plant topology is changed.
+LAYOUT = {
+    "reservoir": {"x": -9.0, "y": 0.0, "z": 0.0, "height": 2.5, "radius": 1.1},
+    "P-101":     {"x": -6.0, "y": 0.6, "z": 0.0},
+    "TK-101":    {"x": -2.0, "z": 0.0},
+    "XV-101":    {"x":  1.0, "y": 1.25, "z": 0.0},
+    "TK-102":    {"x":  4.0, "z": 0.0},
+    "XV-102":    {"x":  7.0, "y": 0.75, "z": 0.0},
+    "TK-103":    {"x": 10.0, "z": 0.0},
+    "XV-103":    {"x": 13.0, "y": 0.25, "z": 0.0},
+    "drain":     {"x": 15.0, "y": 0.0, "z": 0.0},
+}

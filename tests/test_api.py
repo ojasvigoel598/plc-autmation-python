@@ -103,3 +103,21 @@ def test_invalid_tag_rejected():
         r = client.post("/api/control/setpoint",
                         json={"tag": "NOT-A-LOOP", "value": 1.0})
         assert r.status_code == 422
+
+
+def test_plant_config_endpoint():
+    with make_client() as client:
+        r = client.get("/api/plant_config")
+        assert r.status_code == 200
+        cfg = r.json()
+        assert {t["tag"] for t in cfg["tanks"]} == {"TK-101", "TK-102", "TK-103"}
+        assert {v["tag"] for v in cfg["valves"]} == {"XV-101", "XV-102", "XV-103"}
+        assert cfg["pump"]["tag"] == "P-101"
+        assert {l["tag"] for l in cfg["loops"]} == {"LIC-101", "LIC-102"}
+        # 3D layout metadata must be present and finite.
+        for t in cfg["tanks"]:
+            assert t["radius"] > 0 and "x" in t
+        for v in cfg["valves"]:
+            assert "x" in v and "y" in v
+        # Valve topology drives pipe routing in the 3D scene.
+        assert cfg["valves"][0]["upstream"] in {"TK-101", "TK-102", "TK-103"}

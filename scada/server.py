@@ -29,6 +29,7 @@ from . import config
 from .runtime import Runtime
 
 STATIC_DIR = Path(__file__).parent / "static"
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 # Module-level singletons (the server owns one live simulation).
 runtime = Runtime()
@@ -149,6 +150,12 @@ def create_app(start_loop: bool = True) -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+    # Serve the built React 3D digital twin (npm run build -> frontend/dist)
+    # at /app.  Falls back to the legacy 2D P&ID dashboard at / when absent.
+    if FRONTEND_DIST.exists():
+        app.mount("/app", StaticFiles(directory=str(FRONTEND_DIST), html=True),
+                  name="app3d")
+
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(str(STATIC_DIR / "index.html"))
@@ -162,12 +169,17 @@ def create_app(start_loop: bool = True) -> FastAPI:
     async def get_trends() -> JSONResponse:
         return JSONResponse(runtime.trends(400))
 
+    @app.get("/api/plant_config")
+    async def get_plant_config() -> JSONResponse:
+        return JSONResponse(runtime.plant_config())
+
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
         await ws.accept()
         clients.add(ws)
         try:
-            # Send an immediate snapshot so the HMI paints instantly.
+            # Send config + an immediate snapshot so the HMI paints instantly.
+            await ws.send_json({"type": "config", "data": runtime.plant_config()})
             await ws.send_json({"type": "state", "data": runtime.snapshot()})
             await ws.send_json({"type": "trends", "data": runtime.trends(400)})
             while True:
