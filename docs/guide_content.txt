@@ -1,0 +1,247 @@
+#P Multi-Tank PLC / SCADA Process Simulator
+#P An Engineering Guide - from first principles to the live 3D digital twin
+#P Version 1.0 (review-hardened build). Audience: engineers and developers who are new to either this codebase, PLC systems, or both. Written to be read top to bottom, but every part stands alone.
+#PB
+
+#H1 Contents
+#P Part I - Prerequisites
+#P   1. Mathematics
+#P   2. PLC and industrial automation concepts
+#P   3. Software concepts
+#P Part II - How the simulator works
+#P   4. Big picture and data flow
+#P   5. Process physics (tanks, valves, pump, RK4 integrator)
+#P   6. Field instrumentation
+#P   7. The PLC engine (scan cycle, function blocks, interlocks)
+#P   8. PID controllers
+#P   9. Alarms
+#P  10. Leak detection and the event store
+#P  11. Backend: REST and WebSocket
+#P  12. HMI: the 3D digital twin and the SCADA panels
+#P  13. Tests and verification
+#P Part III - Framework use
+#P  14. Adapting the framework for a real project
+#P  15. Honest limits and production readiness
+#P  16. File map and suggested starting points
+#PB
+
+#H1 Part I - Prerequisites
+
+#H2 1. Mathematics
+#P You do not need a control-theory degree, but four ideas appear everywhere in this project. Each is explained in one paragraph together with the place it is used.
+#H3 1.1 Mass / volume balance
+#P A tank is an integrator: whatever volume flows in minus whatever flows out changes the level. Written as an equation: A * dh/dt = Q_in - Q_out, where A is the cross-section (m2), h the level (m) and Q a volumetric flow (m3/s). The whole simulation is this one idea three times, once per tank, in a chain.
+#H3 1.2 Differential equations and numerical integration
+#P dh/dt = (Q_in - Q_out)/A is a first-order ordinary differential equation. A computer cannot solve it continuously, so time is advanced in small jumps and the flows are recomputed each jump. The project uses classical 4th-order Runge-Kutta (RK4) with a 10 ms sub-step: four carefully weighted evaluations of the balance per step. RK4 is accurate for the smooth square-root valve curves here, and a fixed step keeps every run deterministic. Explicit Euler would also be stable (the tank dynamics are slow), but RK4 keeps the mass-balance error orders of magnitude smaller at negligible cost.
+#H3 1.3 Feedback control and the PID equation
+#P A controller holds a process variable (PV, what a transmitter reads) at a setpoint (SP, what the operator wants) by moving an actuator. PID is a weighted recipe of three responses: proportional (react to the size of the error), integral (accumulate the error so steady-state offset becomes zero) and derivative (anticipate the trend).
+#H3 1.4 Units and dimensional reasoning
+#P SI units are used internally: metres, m3, m3/s. Percentages appear only at the PLC/HMI boundary (valve opening 0-100 %, pump speed 0-100 %). The conversion the UI uses everywhere: 1 m3/s = 1000 L/s.
+
+#H2 2. PLC and industrial automation concepts
+#B Scan cycle - a PLC does not run code whenever it wants; it repeats one fixed order: read inputs into an input image, run the program, copy the output image to the field. The project reproduces this discipline at a 100 ms scan.
+#B I/O images - all sensors are sampled once per scan into in-memory tables; the program never reads the field directly. That is what makes a scan deterministic.
+#B IEC 61131-3 function blocks - standard named building blocks: TON/TOF timers, CTU/CTD counters, SR/RS latches, R_TRIG/F_TRIG edge detectors. Each is a small class in scada/plc.py, used exactly as the standard describes.
+#B Interlocks and permissives - an interlock forces a safe state (high-high level cuts the pump) regardless of what the operator asks; a permissive allows a start only when preconditions hold. The E-stop has the highest authority of everything.
+#B Watchdogs - for example: pump commanded ON but no run feedback within 2 seconds latches a trip. Latches stay set until an operator presses RESET.
+#B Alarms and acknowledgement - alarms are latched conditions with timestamps. Acknowledging says "I have seen it" and never clears the cause.
+#B Operating-state machine (ISA-88 / PackML style) - IDLE, STARTING, RUNNING, STOPPING, FAULTED, E_STOPPED with explicit transition rules.
+#B Manual vs automatic - an operator may take a loop to MANUAL and drive the actuator directly; returning to AUTOMATIC must be bumpless (no step in the output).
+#B HMI/SCADA - the panel may suggest any command, but the PLC decides. This project enforces that rule in both directions.
+
+#H2 3. Software concepts
+#B Python package scada/ - modules with clear boundaries, type hints, and a single runtime authority.
+#B FastAPI - the web framework for the REST endpoints and the WebSocket channel, with Pydantic validating every request.
+#B WebSocket - the low-latency push channel that streams live state 10 times per second to the browsers.
+#B React - a component UI: the screen is built from small components that re-render when their inputs change.
+#B react-three-fiber / Three.js - React bindings for WebGL: the 3D scene is a React tree of mesh components.
+#B JSON - the wire format for both telemetry and commands.
+#B pytest - the test suite (about 70 tests) covering physics, control loops, the PLC engine, the API and the leak detector.
+#B Git - one commit per meaningful change, enforced by AGENTS.md and CLAUDE.md.
+#PB
+
+#H1 Part II - How the simulator works
+
+#H2 4. Big picture: the data flow that makes it a digital twin
+#P The single most important idea: there is exactly one simulation, owned by Python. The 3D scene and the SCADA panels are viewers. Nothing about process state is invented in the browser.
+#C
++------------------------------------------------------------------+
+| React + Three.js digital twin (browser)                          |
+|  3D tanks / pipes / valves - SCADA panels - trends               |
++------------------------------------------------------------------+
+   ^  WebSocket: config/state/trends       |  REST commands (validated)
+   |                                      v
++------------------------------------------------------------------+
+| Backend: FastAPI (scada/server.py)                              |
+|  /ws broadcast loop        /api/control/*                       |
++------------------------------------------------------------------+
+   ^                                      v
++------------------------------------------------------------------+
+| Runtime ("field bus") - one scan = 100 ms                       |
+|  sensors -> PLC input image -> program -> output image           |
+|  -> actuators (slew) -> plant physics (RK4) -> next scan         |
++------------------------------------------------------------------+
+#E
+#P The loop that matters: an operator drags a slider in the browser, the command goes through the REST API, the PLC evaluates it against state, interlocks and E-stop on the next scan, the outputs move the pump/valve targets, the actuators slew, flows change, levels change, the transmitter reports the new level, and the WebSocket broadcasts the snapshot that re-renders the 3D tank, the faceplates and the trends. If the PLC rejects the command, the HMI shows the request next to the enforced value plus the interlock reason - it never pretends the command worked.
+#P The reverse direction works too: a disturbance (a leak) changes the levels; the controllers reply and the pump/valve outputs change on their own.
+
+#H2 5. Process physics (scada/process.py, scada/config.py)
+#P The plant is a gravity cascade: reservoir -> pump P-101 -> tank TK-101 -> valve XV-101 -> tank TK-102 -> valve XV-102 -> tank TK-103 -> valve XV-103 -> drain. Tank bases step downward (z_base 1.5 / 1.0 / 0.5 m) so gravity drives the flow, like many real drain trains.
+#H3 5.1 Valve equation
+#C
+Q = u * KV * sqrt(dh)          KV = Cd * A_orifice * sqrt(2 g)
+#E
+#P u is the fractional opening, KV the valve conductance, dh the hydraulic head difference between the two connected nodes (base elevation plus level). The square root is the sharp-orifice law: double the head and the flow grows by about 1.41x. That nonlinearity is one reason the RK4 integrator is used.
+#H3 5.2 Pump equation
+#C
+Q = speed_fraction * Q_max * max(0, 1 - DROOP * discharge_head)
+#E
+#P A lightly drooping centrifugal curve: at higher discharge head the pump delivers a little less. One parameter keeps the pump from behaving like an ideal source against a tall column.
+#H3 5.3 Tanks and the RK4 integrator
+#C
+A * dh/dt = Q_in - Q_out                    # per tank
+level += (h/6) * (k1 + 2*k2 + 2*k3 + k4)    # RK4 sub-step, h = 10 ms
+#E
+#P If a level would pass the tank lip, the excess is converted into a reported overflow flow and the level clamps at the lip; empty tanks clamp at zero. A mass-balance test in the suite verifies conservation continuously.
+#H3 5.4 Actuator dynamics
+#P Valves and the pump do not jump: they slew at 50 % of stroke per second, like real motorised valves. The commanded position and the physical position differ while travelling - and the PLC's valve-travel watchdog exploits exactly that difference.
+#T Rate | Period | Purpose
+Process integration | 10 ms | RK4 sub-step of the tank ODE
+PLC scan / control | 100 ms | input image -> program -> outputs
+Sensor sampling | 100 ms | transmitters sampled with noise / faults
+UI refresh | 100 ms | WebSocket push to the browsers
+#E
+#H3 5.5 A worked example
+#P TK-102 sits at 0.80 m and XV-101 opens from 50 % to 55 %:
+#C
+head   = (1.5 + 1.0) - (1.0 + 0.8) = 0.7 m
+Q      = 0.55 * KV * sqrt(0.7) ~ 0.0075 m3/s = 7.5 L/s
+dh/dt  = (Q_in - Q_out) / A        # TK-102 rises until the flows balance
+#E
+#P The chain position -> head -> flow -> level change is exactly what the model evaluates on every scan.
+
+#H2 6. Field instrumentation (scada/process.py, scada/runtime.py)
+#P Level transmitters LT-101/102/103 read levels in metres. Each transmitter is an object with a fault model: OK, STUCK, FAIL_HIGH, FAIL_LOW, DRIFT, NaN. The runtime injects a fault; the PLC discovers it through the input image - the same way a technician observes it. The NaN case matters: a NaN reading must reach the PLC's plausibility network and must NOT be silently clamped to the full-scale mark. (A review found Python's min()/max() silently turn NaN into full scale, hiding the fault class entirely; it is now fixed and regression-tested.)
+#P Transmitters also add small Gaussian noise (1 mm standard deviation) so the PID derivative channel has something to exercise and reject.
+#P Field faults the operator can inject from the HMI: six transmitter faults, pump trip (loss of run feedback), stuck valve (position frozen), blocked outlet (flow starved), and tank leaks. All of them are field-side events - the PLC only learns through its inputs and watchdogs.
+
+#H2 7. The PLC engine (scada/plc.py)
+#H3 7.1 The scan cycle
+#C
+def scan(self, dt):
+    # 1) edge-detect the operator buttons in the input image
+    # 2) networks in fixed order:
+    #    a) sensor plausibility      (NaN / implausible level rate)
+    #    b) level alarms             (HIHI / HI / LO)
+    #    c) ISA-88 operating state machine
+    #    d) PID loops                (only while running)
+    #    e) interlocks & outputs     (E-stop > HIHI > loop outputs)
+    #    f) pump + valve travel watchdogs
+    #    g) alarm coils              (horn / light / status)
+    # 3) clear the single-scan button pulses
+#E
+#P Networks execute in order every scan, like rungs in ladder logic. The runtime copies the field into the input image before scan() and applies the outputs after it, so the PLC cannot see its own outputs until the next scan.
+#H3 7.2 Function blocks in use
+#T Block | Purpose in this plant
+TON 1 s | start and stop hold-off (STARTING / STOPPING states)
+TON 2 s | pump run-feedback watchdog (trip if no feedback in time)
+TON 2 s | valve travel watchdog (cmd vs position deviation > 15 % sustained)
+CTU | pump start-cycle maintenance counter
+RS latches | pump trip, valve fault, per-sensor fault latch
+R_TRIG | button pulse edge detection
+#E
+#H3 7.3 Interlocks and fail-safe
+#P Authority order: E-stop, then HIHI level trips, then pump/valve latches, then loop outputs. The fail-safe position of every final element is closed or off. The E-stop is a latched input: even if the field input releases, the PLC stays in E_STOPPED until an operator presses RESET - accepted only from FAULTED or E_STOPPED - which clears the latches and returns to IDLE.
+#P The travel-deviation watchdog compares the command with the actual (slew-limited) position. During healthy travel the deviation stays below the alarm band and no nuisance trip occurs; a field-stuck valve keeps the deviation high and trips after 2 s. A review fix made the feedback the true physical position (it previously reported the command itself, which defeated the watchdog).
+
+#H2 8. PID controllers (scada/pid.py)
+#C
+u(t) = Kp*e + Ki*integral(e) + Kd * (-dPV/dt)     # derivative on measurement
+#E
+#B derivative on the measurement, not on the error - setpoint steps do not kick the actuator; a first-order filter suppresses transmitter noise
+#B integral anti-windup by back-calculation while the output saturates
+#B bumpless manual-to-auto transfer (integrator re-initialised)
+#B output limits 0-100 % and direct / reverse-acting selection
+#P Tuning in this plant (Kp 200 %/m, Ki 50 %/(m*s), Kd 0): a 0.2 m setpoint step on TK-102 settles in about 30 s with slight overshoot while the valve saturates against its stroke limits - the physically expected behaviour, and tested with zero steady-state error.
+#H3 8.1 Manual mode
+#P In MANUAL the controller stops integrating, the output follows the operator's slider, and the integrator keeps tracking the manual output so the return to AUTO is bumpless. The HMI faceplates expose a Manual MV slider for each loop - a review fix, because switching LIC-102 to MANUAL previously left the operator with no way to drive valve XV-101.
+#PB
+
+#H2 9. Alarms
+#B raised on condition; the alarm manager keeps an active dictionary and a capped history (last 200)
+#B Acknowledge sets ACKED (operator has seen it); Clear sets CLEARED; acknowledging never clears the cause
+#B severity WARNING / HIGH / CRITICAL drives the horn coil (HIGH+) and the lamp (WARNING+)
+#B alarms in this plant: LSHH / LSH / LSL per tank, LT_FAULT, P-101_TRIP, VALVE_FAULT, ESTOP, LK-xxx leak
+#B the HMI lists active alarms with ACK buttons plus the history; the 3D scene beacons the affected equipment - colour is never the only signal
+
+#H2 10. Leak detection and the persistent event store
+#P Leaks exist only at tanks (a term in the mass balance). The detector reconciles, per tank, the volume change the measured flows explain with the volume change the level shows; over an 8 s window the unexplained loss is estimated as (explained minus observed) divided by the window. Above a minimum rate it records a leak event and raises a LK-xxx alarm; when the loss stops, the event resolves. The UI labels the leak rate as an estimate and the recorded facts as facts - the tool never presents a guess as a measurement.
+#P Events persist in a single JSON file (data/leaks.json) written atomically under a lock; no database. Routes /app/leaks, /app/leaks/latest and /app/leaks/{id} survive browser refresh and server restart.
+
+#H2 11. Backend: REST + WebSocket (scada/server.py)
+#T Group | Endpoints (all validated by Pydantic schemas)
+State / auto | /api/control/start /stop /reset /estop /ack
+Loop / setpoint | /api/control/setpoint /tuning /mode
+Manual actuators | /api/control/manual_valve /manual_pump
+Fault injection | /api/faults/sensor, pump, valve, block, disturbance, leak
+Leak history | /api/leaks | /api/leaks/latest | /api/leaks/{id}
+Telemetry | GET /api/state /api/trends /api/plant_config
+Live stream | WS /ws - config (once), state (every scan), trends (0.5 s)
+#E
+#P The server keeps a per-client outbound queue so one slow browser can never stall the plant; clients that fill their queue are dropped and their sender tasks cancelled (review fix). A simulation-tick exception is logged and skipped rather than killing the loop (review fix) - and the HMI shows a STALE indicator if no state frame arrives for 3.5 s.
+
+#H2 12. HMI: the 3D digital twin and the SCADA panels (frontend/)
+#P The browser is a viewer of the WebSocket stream: it renders exactly the state the backend broadcasts, and commands go out only through the validated REST API. Every visual element maps to one backend field:
+#T Visual element (3D) | Backend source (Python -> WebSocket -> 3D)
+Tank liquid height | plant.levels[tag] -> state.levels[tag] -> liquid cylinder height
+Pipe flow particles | plant.flows[tag] -> state.flows[tag] (stop when flow stops)
+Valve disc angle | plant.valves[tag].open_frac (actual position) -> state.valves[tag].eff
+Pump ring / impeller | pump speed + run coil -> state.pump.eff / state.pump.running
+Alarm beacon / leak jet | alarm manager + leaks.active -> state.alarms / state.leaks.active
+Tank label live value | process level -> state.levels[tag]
+#E
+#H3 12.1 The 3D stack
+#P React 18 + Vite, react-three-fiber (R3F) over Three.js, drei helpers for the orbit camera, grid and HTML labels. Geometry comes from /api/plant_config (tank positions and radii, valve locations, pump placement): change the topology in config.py and the scene rebuilds - there is no hand-tuned animation.
+
+#H2 13. Tests and verification
+#P About 70 pytest tests: IEC function-block semantics, alarm lifecycle, state machine, interlock priority, PID unit behaviour (anti-windup, bumpless, derivative-on-measurement), physics (orifice law, mass conservation, overflow/empty limits), closed-loop integration (setpoint tracking, disturbance rejection, no limit cycle), API validation, leak-store persistence, plus regressions for the two review bugs (NaN propagation; actuator feedback truth).
+#P e2e_acceptance.py runs the live server end-to-end: WebSocket handshake + telemetry, START to RUNNING, setpoint change, leak inject/detect/resolve, disturbance, E-stop, unsafe-command handling (register accepted but forced to fail-safe), and recovery. As the review acceptance gate it was executed 10 consecutive times with zero failures, including a hard server restart in the middle.
+#B Run it yourself: python -m pytest (fast) and python e2e_acceptance.py (server first).
+#PB
+
+#H1 Part III - Use this as a framework
+
+#H2 14. Adapting the framework for a real project
+#P The system was built with a config-over-code philosophy: the plant, loops, rates and 3D layout are all data, and the 3D scene rebuilds from that data. The same pattern scales to bigger plants:
+#B add or change tanks, pumps, valves and sensors in scada/config.py (+ process.py for new physics); the scan, panels and 3D scene adapt automatically
+#B replace the pump curve with a real curve array, or a valve KV with a size table, inside Plant._flows
+#B add process blocks (reaction, heating, mass transfer) as extra ODE terms in _derivs or as plant-side sub-models that report flows into the tanks
+#B keep the IEC function-block library and add unit state machines as scan networks for new sequences
+#B for a real PLC boundary: keep the runtime field-side and swap the actuator write for a Modbus TCP / OPC UA driver, reading inputs from the driver instead of plant telemetry - the REST/WS contract stays unchanged
+#B where the simulation is the stateful authority, replicate read-side WebSocket gateways and shard per plant unit; never replicate the stateful core without consensus
+#B before industrial use, add: identity/audit on the API, a historian in place of the trend deque, and a managed deployment (the event-store pattern already generalises to SQLite then a historian)
+
+#H2 15. Honest limits and production readiness
+#T Artifact | Status
+Educational simulation | fully implemented and tested
+Engineering / digital-twin prototype | implemented, single user, local
+Production software | no - no auth, no TLS, no redundancy
+Safety-critical industrial control | explicitly NOT - Python, not a certified PLC
+#E
+#P The physics are deterministic and mass-conserving; the control logic follows IEC 61131-3 concepts; every UI value traces to a Python source variable. But there is no certification, no real I/O, no SIL rating and no real hardware interface. The README repeats this so the project can never be mistaken for a certified system.
+
+#H2 16. File map and suggested starting points
+#T File | Read it for
+scada/config.py | every adjustable engineering value (tanks, loops, rates, thresholds, layout)
+scada/process.py | how the plant physics integrate (tanks, valves, pump, RK4)
+scada/plc.py | how a real PLC scan is coded (networks, blocks, interlocks)
+scada/runtime.py | the field-bus wiring, fault injection, snapshot
+scada/server.py | the API and the WebSocket stream
+scada/leakdetect.py + leaks.py | leak detection and the persistent event store
+frontend/src/App.jsx | the HMI: tabs, controls, inspector, auto-demo
+frontend/src/PlantScene.jsx | the 3D digital twin (visual consumer of state)
+tests/ | what behaviour is asserted
+frontend/src/PlcView.jsx | live I/O image and function-block HMI
+e2e_acceptance.py | the live acceptance gate
+#E
+#P Suggested route by role: process/control engineer - sections 5 to 9 and scada/plc.py; software engineer - sections 11 to 13 and the frontend; integrator wiring a real system - sections 14 to 15; reviewer or hiring manager - the README, the live screenshot in docs/screenshots/, and the running app at http://127.0.0.1:8000/app.
