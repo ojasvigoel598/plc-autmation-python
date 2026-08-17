@@ -41,6 +41,9 @@ frontend/                    # React + Three.js 3D digital twin (built -> /app)
   src/App.jsx                # SCADA panels, controls, alarms, trends, faults, auto-demo
 tests/                       # pytest: physics, PID, PLC, closed loop, API
 docs/generate_demo_figure.py # regenerates docs/demo_response.png
+docs/engineering_guide.py    # stdlib-only generator for the DOCX guide
+docs/guide_content.txt       # markup source of the DOCX guide
+docs/PLCSim_Engineering_Guide.docx  # beginner-friendly engineering guide
 main.py + legacy modules     # ORIGINAL matplotlib demo (superseded, keep intact)
 ```
 
