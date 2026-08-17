@@ -101,15 +101,36 @@ intermittent/race issues.
 
 ## Workflow rules (repo owner requires these)
 
-- **Commit every change** — small commits, one logical change each, with a
-  descriptive message.
+**Commit granularly — never one big commit at the end of a feature.**
+
+For every feature:
+
+1. Break it into logical, independently reviewable steps (scaffolding,
+   backend/API, data/config, individual components, telemetry integration,
+   controls, alarms/interlocks, tests, documentation).
+2. Implement ONLY the next step.
+3. Run the relevant tests/checks and verify it works.
+4. Fix failures and re-test.
+5. Commit that step immediately (small, descriptive, conventional message).
+6. Move to the next step; repeat until the feature is complete.
+7. Push to GitHub before continuing when appropriate.
+
+A 200+ line feature spanning multiple logical stages should normally
+produce **several** commits — one per completed, verified stage — not a
+single commit.  Do not batch unrelated implementation/testing/docs/frontend/
+backend work into one commit, and do not invent empty commits just to raise
+the count: every commit must be a real, reviewable change.
+
 - **Push to GitHub** after committing:
   `git push origin main` (remote is ojasvigoel598/plc-autmation-python).
 - **Security check before every commit**: no API keys, tokens, passwords,
-  private URLs, `.env`, generated logs/plots (except `docs/demo_response.png`),
-  or `__pycache__`/venvs.  `.gitignore` already covers most of these.
+  private URLs, `.env`, generated logs/plots (except `docs/demo_response.png`
+  and the committed `frontend/dist/`), or `__pycache__`/venvs.  `.gitignore`
+  already covers most of these.
 - Never force-push unless explicitly told to.
 - Keep the README in sync with the actual implementation.
+- Before starting any change, inspect `git log` and `git status` so you
+  don't duplicate or overwrite existing work.
 
 ## Frontend rules
 
