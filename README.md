@@ -194,7 +194,13 @@ Two HMI frontends share the same backend:
   * alarm beacons and per-equipment highlighting driven by PLC alarm state;
   * SCADA side panels: overview, operator controls, PID faceplates, alarms
     (with ACK) and history, live trends, and fault injection;
-  * clicking equipment selects it and exposes its live telemetry.
+  * clicking equipment selects it and exposes its live telemetry;
+  * a **PLC internals** tab rendering the live I/O image (DI/AI/DQ/AQ),
+    IEC 61131-3 function-block states (TON/CTU/RS with timer bars),
+    active interlocks and the scan-cycle program order;
+  * a **scripted auto-demo** that walks startup → setpoint step →
+    disturbance → pump trip → recovery → E-stop via the same REST pathway
+    an operator would use.
 * **2D P&ID HMI** (legacy, kept) — `scada/static/`, served at `/` with no
   build step: SVG schematic, canvas trends, alarm table and operator panel.
 
@@ -315,6 +321,10 @@ the dev proxy and `scada/server.py` for the production static mount.
    to AUTO — the transfer is bumpless.
 5. Inject a **fault** (pump trip, stuck valve, sensor failure, blocked
    outlet), observe the alarm, interlock and safe state, then reset.
+6. Open the **PLC** tab to watch the I/O image, function-block timers and
+   latches respond live to every action above.
+7. Press **RUN AUTO-DEMO** for a hands-off walkthrough of the whole
+   lifecycle (start, setpoint step, disturbance, fault, recovery, E-stop).
 
 ### Example scenario (end-to-end)
 

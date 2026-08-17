@@ -36,7 +36,9 @@ scada/
 frontend/                    # React + Three.js 3D digital twin (built -> /app)
   src/sim.js                 # WS client (reconnect) + REST command pathway
   src/PlantScene.jsx         # 3D plant driven ONLY by simulation state
-  src/App.jsx                # SCADA panels, controls, alarms, trends, faults
+  src/PlcView.jsx            # PLC internals: I/O image, FBs, interlocks, program order
+  src/LeakView.jsx           # leak investigation: latest + last 30, /leaks routes
+  src/App.jsx                # SCADA panels, controls, alarms, trends, faults, auto-demo
 tests/                       # pytest: physics, PID, PLC, closed loop, API
 docs/generate_demo_figure.py # regenerates docs/demo_response.png
 main.py + legacy modules     # ORIGINAL matplotlib demo (superseded, keep intact)
@@ -95,7 +97,7 @@ Changing Kp/Ki/Kd/SP/MV in the UI must change controller behaviour.
 ## Testing & verification (mandatory before finishing any change)
 
 ```bash
-python -m pytest tests/ -q          # must pass (currently 63 tests)
+python -m pytest tests/ -q          # must pass (currently 64 tests)
 python run_scada.py                 # server on http://127.0.0.1:8000
 cd frontend && npm run build        # rebuild the 3D twin (served at /app)
 ```
@@ -152,6 +154,8 @@ the count: every commit must be a real, reviewable change.
   hard-code tag/position maps in JSX when the config already provides them.
 - **Build before release.** `npm run build` must succeed (Vite) and the
   output is served by FastAPI at `/app` (asset base is `/app/`).
+- The **PLC tab** and **auto-demo** render/send only live backend state and
+  REST commands — never a second simulation or bypass of interlocks.
 - **`frontend/dist/` is committed** so the twin runs without Node for end
   users; always rebuild and re-commit it after any `frontend/src` change.
 - Frontend deps live in `frontend/package.json`; no CDN, no global three.js
