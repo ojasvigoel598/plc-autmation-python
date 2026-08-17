@@ -121,10 +121,16 @@ class LevelTransmitter:
         elif self.fault == "NAN":
             return float("nan")
 
-        if self.noise_std > 0.0:
+        if self.noise_std > 0.0 and not math.isnan(value):
             value += float(rng.normal(0.0, self.noise_std))
 
-        # Normal transmitters read zero at empty and full scale at overflow.
+        # A NaN/Inf measurement must propagate to the PLC's plausibility
+        # check.  (min()/max() would silently coerce NaN to full scale: with
+        # Python's comparison ordering, min(height, nan) returns height.)
+        if math.isnan(value) or math.isinf(value):
+            return float(value)
+
+        # Normal transmitters read at zero when empty and full scale at scale.
         return max(0.0, min(config.TANK_HEIGHT, value))
 
     def set_fault(self, fault: str) -> None:

@@ -1,6 +1,8 @@
 """Closed-loop integration tests: setpoint tracking, disturbance rejection,
 safety interlocks and recovery."""
 
+import math
+
 import pytest
 
 from scada import config
@@ -126,6 +128,28 @@ def test_snapshot_exposes_plc_internals(settled):
     assert fb["trip_latch"] is False
     assert len(fb["sensor_fault_latches"]) == 3
     assert plc["loop_mode"]["LIC-101"] == "AUTO"
+
+
+def test_nan_transmitter_fault_propagates_to_plc(settled):
+    """A NAN transmitter must surface as NaN telemetry (not silently clamp
+    to full scale) and force the affected loop to a safe manual output."""
+    rt = settled
+    rt.set_sensor_fault("LT-102", "NAN")
+    # Let a few scans run; the transmitter read must stay NaN.
+    for _ in range(3):
+        rt.step()
+    assert all(math.isnan(rt.plant.level_tx["LT-102"].read(
+        rt.plant.levels["TK-102"], config.PLC_SCAN_DT, rt.plant.rng))
+        for _ in range(2)), "NAN fault must not be clamped by the transmitter"
+    assert rt.plc._sensor_fault_latch["LT-102"].q is True
+    assert "LT-102_FAULT" in rt.plc.alarms.active
+    assert rt.plc.loop_mode["LIC-102"] == "MANUAL"
+    assert rt.plc.pids["LIC-102"].mv == 0.0
+    # Clear the fault: the latch persists until an operator reset.
+    rt.clear_sensor_fault("LT-102")
+    for _ in range(3):
+        rt.step()
+    assert rt.plc._sensor_fault_latch["LT-102"].q is True
 
 
 def test_mass_balance_over_full_run():
