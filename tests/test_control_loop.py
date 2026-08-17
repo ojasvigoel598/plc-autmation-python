@@ -109,6 +109,25 @@ def test_snapshot_includes_tank_attributes(settled):
         assert "leak_detected" in tk and "overflow_volume" in tk
 
 
+def test_snapshot_exposes_plc_internals(settled):
+    rt = settled
+    s = rt.snapshot()
+    plc = s["plc"]
+    assert plc["state"] == "RUNNING"
+    assert plc["scan_count"] > 0
+    # I/O image is present and structured
+    assert "LT-101" in plc["ai"] and "XV-101_FB" in plc["ai"]
+    assert "I0.0_ESTOP" in plc["di"] and "I0.4_PUMP_FB" in plc["di"]
+    assert "P-101" in plc["aq"] and "XV-101" in plc["aq"]
+    assert "Q0.0_PUMP" in plc["dq"]
+    # Function-block states are exposed
+    fb = plc["fbs"]
+    assert "start_timer_et" in fb and "pump_cycles" in fb
+    assert fb["trip_latch"] is False
+    assert len(fb["sensor_fault_latches"]) == 3
+    assert plc["loop_mode"]["LIC-101"] == "AUTO"
+
+
 def test_mass_balance_over_full_run():
     rt = Runtime()
     rt.plc.pulse_start()

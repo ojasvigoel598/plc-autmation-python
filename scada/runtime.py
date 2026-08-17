@@ -314,6 +314,30 @@ class Runtime:
             "interlocks": exp["interlocks"],
             "coils": plc.q,
             "scan_count": plc.scan_count,
+            "plc": {
+                "state": plc.state,
+                "scan_count": plc.scan_count,
+                "ai": dict(plc.ai),          # analog inputs (engineering units)
+                "di": dict(plc.i),           # digital inputs
+                "aq": dict(plc.aq),          # analog outputs (%)
+                "dq": dict(plc.q),           # digital outputs
+                "fbs": {
+                    "start_timer_et": plc._start_timer.et,
+                    "start_timer_q": plc._start_timer.q,
+                    "stop_timer_et": plc._stop_timer.et,
+                    "pump_trip_timer_et": plc._pump_trip_timer.et,
+                    "valve_fault_timer_et": plc._valve_fault_timer.et,
+                    "pump_cycles": plc._pump_cycle_ctr.cv,
+                    "trip_latch": plc._trip_latch.q,
+                    "valve_fault_latch": plc._valve_fault_latch.q,
+                    "sensor_fault_latches": {
+                        tag: latch.q for tag, latch in plc._sensor_fault_latch.items()
+                    },
+                },
+                "loop_mode": dict(plc.loop_mode),
+                "manual_valves": dict(plc.manual_valves),
+                "manual_pump": plc.manual_pump,
+            },
         }
 
     def plant_config(self) -> dict:
