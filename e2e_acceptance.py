@@ -40,6 +40,16 @@ async def main():
                 types.add(m["type"])
             check("WS sends config/state/trends", {"config", "state", "trends"} <= types, str(types))
 
+            # Keep draining the socket for the rest of the run so the client
+            # never applies backpressure to the server's broadcast loop.
+            async def drain():
+                try:
+                    async for _ in ws:
+                        pass
+                except Exception:
+                    pass
+            drainer = asyncio.create_task(drain())
+
             # 3) start the plant
             r = await c.post("/api/control/start")
             check("start ok", r.status_code == 200 and r.json().get("ok"))
@@ -57,7 +67,22 @@ async def main():
             r = await c.get("/api/state")
             check("setpoint applied", abs(r.json()["pids"]["LIC-101"]["sp"] - 1.1) < 1e-9)
 
-            # 6) disturbance -> alarm path (leak on TK-102 -> LIC-102 responds)
+            # 6) persistent leak: inject -> mass-balance detect -> event -> resolve
+            r = await c.post("/api/faults/leak", json={"tank": "TK-102", "flow_m3s": 0.005})
+            check("leak inject ok", r.status_code == 200)
+            await asyncio.sleep(10.0)   # > LEAK_DETECT_WINDOW
+            r = await c.get("/api/state")
+            check("leak detected in snapshot", "TK-102" in r.json()["leaks"]["active"])
+            r = await c.get("/api/leaks/latest")
+            ev = r.json()["event"]
+            check("latest leak is TK-102", ev is not None and ev["tank"] == "TK-102", str(ev)[:80])
+            check("leak event ACTIVE", ev["status"] == "ACTIVE")
+            r = await c.post("/api/faults/leak", json={"tank": "TK-102", "flow_m3s": 0.0})
+            await asyncio.sleep(18.0)   # resolution can lag two detection windows
+            r = await c.get("/api/leaks/latest")
+            check("leak resolved in history", r.json()["event"]["status"] == "RESOLVED")
+
+            # 6b) disturbance -> alarm path (timed leak on TK-102)
             r = await c.post("/api/faults/disturbance", json={"tank": "TK-102", "flow_m3s": 0.006, "duration": 20})
             check("disturbance ok", r.status_code == 200)
             await asyncio.sleep(2.0)
@@ -92,6 +117,8 @@ async def main():
             await asyncio.sleep(0.5)
             r = await c.get("/api/state")
             check("recovered to IDLE", r.json()["state"] == "IDLE", r.json()["state"])
+
+            drainer.cancel()
 
     print("\nRESULT:", "ALL PASS" if ok else "FAILURES PRESENT")
     return 0 if ok else 1
