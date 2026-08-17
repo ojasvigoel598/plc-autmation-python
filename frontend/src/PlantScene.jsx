@@ -98,6 +98,50 @@ function Beacon({ position, color, active }) {
   );
 }
 
+/* Escaping-fluid jet at a leaking tank.  Falls from a low point on the tank
+   wall to the ground; fall speed scales with the detected leak rate. */
+function LeakJet({ tank, rate }) {
+  const ref = useRef();
+  const N = 16;
+  const leakY = tank.z_base + 0.3;
+  const fallHeight = Math.max(0.2, tank.z_base + 0.05);
+
+  useFrame((state) => {
+    if (!ref.current) return;
+    const speed = 0.6 + rate * 110; // faster stream = more severe leak
+    for (const d of ref.current.children) {
+      const phase = (d.userData.phase + state.clock.elapsedTime * speed) % 1;
+      d.position.x = tank.radius * 0.92 + phase * 0.3;
+      d.position.y = leakY - phase * fallHeight;
+    }
+  });
+
+  return (
+    <group position={[tank.x, 0, tank.z]}>
+      <group ref={ref}>
+        {Array.from({ length: N }).map((_, i) => (
+          <mesh
+            key={i}
+            position={[tank.radius * 0.92, leakY, 0]}
+            userData={{ phase: i / N }}
+          >
+            <sphereGeometry args={[0.045, 8, 8]} />
+            <meshBasicMaterial color={WATER_GLOW} />
+          </mesh>
+        ))}
+      </group>
+      <Html
+        center
+        position={[tank.radius + 0.45, tank.z_base + 0.45, 0]}
+        distanceFactor={12}
+        style={{ pointerEvents: "none" }}
+      >
+        <div className="hmi-tag leak">⚠ LEAK {(rate * 1000).toFixed(1)} L/s</div>
+      </Html>
+    </group>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* equipment                                                           */
 /* ------------------------------------------------------------------ */
@@ -276,6 +320,7 @@ function alarmEquipment(alarm) {
   if (/^P-|TRIP/.test(t)) return "P-101";
   if (/VALVE/.test(t)) return "XV-101"; // travel fault highlights the first valve
   if (/^LT-/.test(t)) return "LT-" + t.slice(-3);
+  if (/^LK-/.test(t)) return "TK-" + t.slice(-3); // leak alarm -> its tank
   const m = t.match(/(\d{3})$/);
   if (m && /^L[ST]/.test(t)) return "TK-" + m[1];
   return null;
@@ -296,6 +341,15 @@ export default function PlantScene({ config, state, selected, onSelect }) {
     () => (config ? Object.fromEntries(config.tanks.map((t) => [t.tag, t])) : {}),
     [config]
   );
+
+  // tanks with an active (detected) leak, from the backend snapshot only
+  const leaking = useMemo(() => {
+    if (!config || !state?.leaks?.active) return [];
+    return Object.entries(state.leaks.active)
+      .filter(([, rate]) => rate > 0)
+      .map(([tag, rate]) => ({ tank: tanksById[tag], tag, rate }))
+      .filter((x) => x.tank);
+  }, [config, state, tanksById]);
 
   if (!config) {
     return <div className="vp-hint">Loading plant configuration…</div>;
@@ -377,6 +431,11 @@ export default function PlantScene({ config, state, selected, onSelect }) {
       ))}
       {config.valves.map((v) => (
         <Valve key={v.tag} valve={v} state={state} selected={selected === v.tag} onSelect={onSelect} />
+      ))}
+
+      {/* leak jets at actively leaking tanks */}
+      {leaking.map((l) => (
+        <LeakJet key={l.tag} tank={l.tank} rate={l.rate} />
       ))}
 
       {/* drain riser */}
