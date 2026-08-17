@@ -211,7 +211,57 @@ layout), `state` (levels, flows, pump/valve/PID/interlock/alarm state), and
 (`/api/control/*`, `/api/faults/*`).  The client handles reconnect with
 exponential backoff, malformed-message drops, and stale-state recovery.
 
-## 8. Install & run
+## 8. Leak detection & investigation
+
+The plant supports **tank leaks only** — an uncontrolled outflow term in the
+mass balance (`plant.leaks[tag]`).  Pipes, pumps and valves do not leak in
+this model; that is a documented limitation, not something the UI fakes.
+
+### Data flow
+
+```
+leak injection (/api/faults/leak, /api/faults/disturbance)
+        │  runtime.set_leak / inject_disturbance → plant.leaks[tag]
+        ▼
+mass-balance detector (scada/leakdetect.py)
+   unexplained loss = measured flow balance − level-derived volume change
+        │  sustained over LEAK_DETECT_WINDOW and above LEAK_DETECT_MIN_RATE
+        ▼
+leak event recorded (scada/leaks.py → data/leaks.json, persisted)
+        │  + PLC alarm LK-<n> raised / cleared
+        ▼
+REST: /api/leaks, /api/leaks/latest, /api/leaks/{id}
+   snapshot.leaks.active → 3D leak jet + tank highlight
+        ▼
+frontend LeakView (/app/leaks, /app/leaks/latest, /app/leaks/{id})
+```
+
+### Measured vs. derived
+
+* **Measured/simulated fact** — tank, location, level at detection, timestamps.
+* **Derived estimate** — leak rate (unexplained volume loss per second) and
+  severity (rate thresholds).  The UI labels these separately.
+
+### Variables & files
+
+| Concern | File | Key variables |
+|---|---|---|
+| Leak model | `scada/process.py` | `plant.leaks[tag]` (m³/s), `overflow_volume` |
+| Detection | `scada/leakdetect.py` | `MassBalanceLeakDetector.update()` |
+| Event store | `scada/leaks.py` | `LeakEvent`, `LeakStore` (JSON file) |
+| Wiring | `scada/runtime.py` | `_detect_leaks()`, `leak_store` |
+| API | `scada/server.py` | `/api/leaks*`, `/api/faults/leak` |
+| 3D | `frontend/src/PlantScene.jsx` | `LeakJet` (jet + rate label) |
+| History UI | `frontend/src/LeakView.jsx` | latest + previous 30 |
+| Inspector | `frontend/src/App.jsx` | `TankInspector` (source trace) |
+
+Severity: LOW &lt; 2 L/s, MODERATE 2&ndash;10 L/s, HIGH &ge; 10 L/s
+(`scada/leaks.severity_for`).  The store keeps the latest 30 events readily
+available and survives restarts/refreshes; a simulation reset does **not**
+clear the event log (it is a historical record).  `data/` is gitignored
+runtime data.
+
+## 9. Install & run
 
 Requires Python 3.10+ (backend) and Node 18+ (only to *build* the 3D twin;
 the built bundle is served by FastAPI, so end users do not need Node).
@@ -252,7 +302,7 @@ VPS / container host (the whole thing Dockerises cleanly) and point the
 frontend at its `/api` and `/ws` origins.  See `frontend/vite.config.js` for
 the dev proxy and `scada/server.py` for the production static mount.
 
-## 9. Operating the simulation
+## 10. Operating the simulation
 
 1. Open the dashboard and press **START**. The plant goes
    `STARTING -> RUNNING` and the PIDs bring TK-101/TK-102 to their
@@ -279,7 +329,7 @@ pump trip                    -> FAULTED, P-101_TRIP alarm, safe state
 field reset + PLC reset      -> IDLE, ready to restart
 ```
 
-## 10. Testing
+## 11. Testing
 
 ```bash
 python -m pytest tests/ -q
@@ -290,9 +340,11 @@ valve slew, PID (proportional, reverse-acting, anti-windup, derivative-on-
 measurement, bumpless transfer), IEC 61131-3 function blocks, alarm
 ack/clear, the operating state machine, E-stop authority, sensor fault
 latching, HIHI interlock, setpoint tracking, disturbance rejection, pump-trip
-safe state, valve-stuck detection, and the REST API (including validation).
+safe state, valve-stuck detection, mass-balance leak detection and the
+persistent leak store, and the REST API (including validation and the leak
+investigation endpoints).
 
-## 11. Engineering limitations (simulated vs. real hardware)
+## 12. Engineering limitations (simulated vs. real hardware)
 
 This is an educational simulation, **not** a certified PLC or plant model.
 
@@ -303,6 +355,10 @@ This is an educational simulation, **not** a certified PLC or plant model.
   temperature/viscosity effects).
 * Transmitters, actuator faults and run feedback are simplified models of
   real field devices.
+* The leak detector uses the process's true level (not noisy field
+  instruments), so it is deterministic; a real installation would use
+  measured values and therefore need larger thresholds.  Leaks are modelled
+  at tanks only.
 * No OPC UA / Modbus communication to a real PLC.
 
 `PLC2Skill` (an ontology tool for mapping IEC 61131-3 code to skill models)
@@ -310,10 +366,11 @@ was evaluated and is **not used** here: it targets real PLCopen XML / OPC UA
 projects, not runtime simulation.  Its ISA-88 skill state-machine idea is
 reflected in the operating-state machine above.
 
-## 12. Future improvements
+## 13. Future improvements
 
 * Cascade or feed-forward control, gain scheduling.
 * OPC UA / Modbus TCP gateway to a real PLC or SCADA historian.
+* Extend the leak model to pipes and valves (currently tanks only).
 * More unit operations (heat exchanger, pressure loop, conveyor).
 * Packaged as a Docker image with a one-command `docker compose up`.
 * Persist trends/alarms to a time-series database.

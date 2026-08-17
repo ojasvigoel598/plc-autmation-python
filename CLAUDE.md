@@ -28,6 +28,8 @@ scada/
   process.py                 # plant model: tanks, valves, pump, transmitters, RK4
   pid.py                     # PID controller (anti-windup, bumpless, deriv-on-measurement)
   plc.py                     # IEC 61131-3 FBs, alarm manager, PLC scan engine
+  leakdetect.py              # mass-balance leak detector (tanks only)
+  leaks.py                   # LeakEvent + file-backed persistent store (data/leaks.json)
   runtime.py                 # field bus: sensors -> PLC -> actuators -> plant
   server.py                  # FastAPI: REST control + WebSocket telemetry + /app mount
   static/                    # 2D P&ID HMI (vanilla, no build step) at /
@@ -78,6 +80,11 @@ overflow above tank height is spilled to drain and reported
 Mass must balance: the test suite checks it.  Do not "fix" a level by
 clamping; fix the flow physics.
 
+Leaks exist **only as tank leaks** (`plant.leaks[tag]`).  The mass-balance
+detector flags an unexplained level drop (measured flow balance vs. actual
+volume change) and records a `LeakEvent` in `data/leaks.json`.  Never draw a
+pipe/pump/valve leak the simulation does not model.
+
 ## PID rules
 
 Parallel ISA form `u = Kp e + Ki∫e + Kd de/dt`.  Required behaviours:
@@ -88,7 +95,7 @@ Changing Kp/Ki/Kd/SP/MV in the UI must change controller behaviour.
 ## Testing & verification (mandatory before finishing any change)
 
 ```bash
-python -m pytest tests/ -q          # must pass (currently 47 tests)
+python -m pytest tests/ -q          # must pass (currently 63 tests)
 python run_scada.py                 # server on http://127.0.0.1:8000
 cd frontend && npm run build        # rebuild the 3D twin (served at /app)
 ```
