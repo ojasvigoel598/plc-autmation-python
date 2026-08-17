@@ -1,7 +1,28 @@
-import React, { useMemo, useState } from "react";
+import React, { Component, useMemo, useState } from "react";
 import { useSimulation, interlockReason } from "./sim.js";
 import PlantScene from "./PlantScene.jsx";
 import TrendChart from "./TrendChart.jsx";
+
+/* Keeps a single panel's failure from blanking the whole HMI. */
+class ErrorBoundary extends Component {
+  state = { error: null };
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error("Panel error:", error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="tc-empty">
+          Panel error: {String(this.state.error?.message || this.state.error)}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const TANK_ORDER = ["TK-101", "TK-102", "TK-103"];
 const VALVE_ORDER = ["XV-101", "XV-102", "XV-103"];
@@ -169,7 +190,7 @@ function Overview({ config, state, selected, onSelect }) {
 /* ============================================================ */
 /* Controls tab                                                 */
 /* ============================================================ */
-function LoopFaceplate({ tag, pid, mode, disabled, send }) {
+function LoopFaceplate({ tag, pid, mode, disabled, send, config }) {
   const desc = { "LIC-101": "TK-101 level → P-101 speed", "LIC-102": "TK-102 level → XV-101" }[tag];
   const manual = mode === "MANUAL";
   return (
@@ -523,13 +544,15 @@ export default function App() {
             ))}
           </div>
           <div className="side-content">
-            {tab === "Overview" && (
-              <Overview config={config} state={state} selected={selected} onSelect={setSelected} />
-            )}
-            {tab === "Controls" && <Controls config={config} state={state} send={send} />}
-            {tab === "Alarms" && <Alarms state={state} send={send} />}
-            {tab === "Trends" && <Trends trends={trends} />}
-            {tab === "Faults" && <Faults state={state} send={send} />}
+            <ErrorBoundary key={tab}>
+              {tab === "Overview" && (
+                <Overview config={config} state={state} selected={selected} onSelect={setSelected} />
+              )}
+              {tab === "Controls" && <Controls config={config} state={state} send={send} />}
+              {tab === "Alarms" && <Alarms state={state} send={send} />}
+              {tab === "Trends" && <Trends trends={trends} />}
+              {tab === "Faults" && <Faults state={state} send={send} />}
+            </ErrorBoundary>
           </div>
         </aside>
       </div>
