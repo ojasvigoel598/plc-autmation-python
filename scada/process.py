@@ -133,12 +133,6 @@ class LevelTransmitter:
         # Normal transmitters read at zero when empty and full scale at scale.
         return max(0.0, min(config.TANK_HEIGHT, value))
 
-    def set_fault(self, fault: str) -> None:
-        self.fault = fault
-        if fault == "STUCK":
-            # frozen at the value observed on the next read; seed with current
-            self._stuck_value = self._drift_value
-
     def inject_fault(self, fault: str, current_true_level: float) -> None:
         self.fault = fault
         self._drift_value = 0.0

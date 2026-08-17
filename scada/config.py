@@ -131,12 +131,6 @@ LEVEL_HIHI = 0.95      # high-high -> trip interlock
 
 # Sensor fault detection thresholds
 SENSOR_RATE_LIMIT = 0.50   # m/s : implausible rate-of-change trips a sensor fault
-SENSOR_MAX_DEVIATION = 0.20  # m : transmitter vs. redundant trend check
-
-# ---------------------------------------------------------------------------
-# History / trending
-# ---------------------------------------------------------------------------
-TREND_HORIZON = 600.0   # seconds of history retained for the live trends
 
 
 # ---------------------------------------------------------------------------
