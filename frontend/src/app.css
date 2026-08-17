@@ -99,6 +99,11 @@ body {
 .kv .v.crit { color: var(--red-bright); }
 
 .levelbar { height: 12px; background: #0b0f15; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; margin: 2px 0 6px; }
+
+/* inspector: label / value / source-variable trace */
+.ins-row { display: grid; grid-template-columns: 104px 1fr auto; gap: 8px; padding: 3px 0; font-family: var(--mono); font-size: 12px; align-items: baseline; }
+.ins-row .k { color: var(--dim); }
+.ins-row .src { color: #5b6b7d; font-size: 10px; text-align: right; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .levelbar > i { display: block; height: 100%; background: linear-gradient(90deg, #1467c9, #3fa9f5); transition: width .3s; }
 .levelbar > i.warn { background: linear-gradient(90deg, #a97f1a, #e3b341); }
 .levelbar > i.crit { background: linear-gradient(90deg, #8a2623, #ff7b72); }

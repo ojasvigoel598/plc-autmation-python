@@ -82,6 +82,80 @@ function Dot({ tone }) {
   return <span className={`dot ${tone || "gray"}`} />;
 }
 
+/* ------------------------------------------------------------ */
+/* Equipment inspector: real backend values + source variable    */
+/* ------------------------------------------------------------ */
+function IRow({ label, value, unit, source, tone }) {
+  return (
+    <div className="ins-row">
+      <span className="k">{label}</span>
+      <span className={`v ${tone || ""}`}>
+        {value === undefined || value === null ? "—" : value}
+        {unit ? ` ${unit}` : ""}
+      </span>
+      <span className="src" title={source}>{source}</span>
+    </div>
+  );
+}
+
+function TankInspector({ tag, state, config }) {
+  const tk = state?.tanks?.[tag];
+  if (!tk) return null;
+  const n = tag.slice(-3);
+  const sensor = state?.sensor_readings?.[`LT-${n}`];
+  const sensorFault = state?.sensors?.[`LT-${n}`];
+  const loop = config?.loops?.find((l) => l.pv_tag === `LT-${n}`);
+  const pid = loop ? state?.pids?.[loop.tag] : null;
+  const alarms = (state?.alarms || []).filter(
+    (a) =>
+      a.tag === `LSHH-${n}` || a.tag === `LSH-${n}` || a.tag === `LSL-${n}` ||
+      a.tag === `LK-${n}` || a.tag === `LT-${n}_FAULT`
+  );
+  return (
+    <div className="panel">
+      <h3>{tag} — tank inspector</h3>
+      <IRow label="Level" value={tk.level?.toFixed(3)} unit="m" source="state.tanks[tag].level ← plant.levels" />
+      <IRow label="Level %" value={tk.level_pct?.toFixed(1)} unit="%" source="level / tank_height × 100" />
+      <IRow label="Volume" value={tk.volume?.toFixed(3)} unit="m³" source="level × area" />
+      <IRow label="Capacity" value={tk.capacity?.toFixed(2)} unit="m³" source="tank.area × tank.height" />
+      <IRow label="Cross-section" value={tk.area?.toFixed(2)} unit="m²" source="tank.area" />
+      <IRow label="Inlet flow" value={(tk.q_in * 1000).toFixed(2)} unit="L/s" source="plant.flows (upstream)" />
+      <IRow label="Outlet flow" value={(tk.q_out * 1000).toFixed(2)} unit="L/s" source="plant.flows (downstream)" />
+      <IRow label="Net flow" value={(tk.net_flow * 1000).toFixed(2)} unit="L/s" source="q_in − q_out" />
+      <IRow label="Overflow (cum.)" value={tk.overflow_volume?.toFixed(3)} unit="m³" source="plant.overflow_volume" />
+      <IRow
+        label="Leak"
+        value={tk.leak_active ? `ACTIVE · ${(tk.leak_detected * 1000).toFixed(2)} L/s` : "none"}
+        unit=""
+        tone={tk.leak_active ? "crit" : ""}
+        source="plant.leaks + mass-balance detector"
+      />
+      <IRow
+        label="Sensor reading"
+        value={sensor?.toFixed(3)}
+        unit="m"
+        tone={sensorFault !== "OK" ? "crit" : ""}
+        source={`ai["LT-${n}"] (transmitter)`}
+      />
+      <IRow label="Sensor status" value={sensorFault} unit="" tone={sensorFault !== "OK" ? "crit" : ""} source="level_tx[tag].fault" />
+      {pid && (
+        <>
+          <IRow label="Controller" value={loop.tag} unit="" source="PID loop (pv_tag match)" />
+          <IRow label="Setpoint" value={pid.sp?.toFixed(2)} unit="m" source={`pids[${loop.tag}].sp`} />
+          <IRow label="Process value" value={pid.pv?.toFixed(2)} unit="m" source={`pids[${loop.tag}].pv`} />
+          <IRow label="Output" value={pid.mv?.toFixed(0)} unit="%" source={`pids[${loop.tag}].mv`} />
+          <IRow label="Mode" value={pid.mode} unit="" source={`loop_mode[${loop.tag}]`} />
+        </>
+      )}
+      {alarms.length > 0 && (
+        <div className="override red">Alarms: {alarms.map((a) => `${a.tag} (${a.state})`).join(" · ")}</div>
+      )}
+      <IRow label="Plant state" value={state?.state} unit="" source="plc.state" />
+      <IRow label="Sim time" value={`T+${fmtTime(state?.t)}`} unit="" source="plant.t" />
+    </div>
+  );
+}
+
 /* ============================================================ */
 /* Top bar                                                       */
 /* ============================================================ */
@@ -121,6 +195,14 @@ function Overview({ config, state, selected, onSelect }) {
 
   return (
     <div>
+      {selected && tanks.some((t) => t.tag === selected) ? (
+        <TankInspector tag={selected} state={state} config={config} />
+      ) : (
+        <div className="panel">
+          <h3>Inspector</h3>
+          <div className="tc-empty">Click a tank in the 3D view or the list to inspect its live state.</div>
+        </div>
+      )}
       <div className="panel">
         <h3>Operating state</h3>
         <div className="kv"><span className="k">PLC state</span><span className="v">{state?.state || "—"}</span></div>
