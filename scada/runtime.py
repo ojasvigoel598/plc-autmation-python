@@ -20,6 +20,8 @@ import time
 from collections import deque
 
 from . import config
+from .leakdetect import MassBalanceLeakDetector
+from .leaks import LeakStore
 from .plc import PLC
 from .process import Plant
 
@@ -28,7 +30,7 @@ PUMP_FB_THRESHOLD = 0.001  # m^3/s
 
 
 class Runtime:
-    def __init__(self) -> None:
+    def __init__(self, leak_store: LeakStore | None = None) -> None:
         self.plant = Plant()
         self.plc = PLC()
 
@@ -37,6 +39,12 @@ class Runtime:
         self.valve_stuck: dict[str, bool] = {t: False for t in ("XV-101", "XV-102", "XV-103")}
         self.valve_stuck_pos: dict[str, float] = {t: 0.0 for t in self.valve_stuck}
         self.leaks: dict[str, float] = {t: 0.0 for t in config.TANKS}
+
+        # Leak detection & persistent event log.
+        self.leak_store = leak_store if leak_store is not None else LeakStore()
+        self.leak_detector = MassBalanceLeakDetector()
+        self._active_leaks: dict[str, str] = {}   # tank tag -> leak event id
+        self._last_leak_rate: dict[str, float] = {t: 0.0 for t in config.TANKS}
 
         # Timed disturbance bookkeeping.
         self._disturbance_until = 0.0
@@ -99,6 +107,9 @@ class Runtime:
         # 4) PLANT PHYSICS advance.
         plant.step(dt)
 
+        # 5) LEAK DETECTION: reconcile each tank's mass balance.
+        self._detect_leaks(dt)
+
         self._last_effective_pump = eff_pump
         self._last_effective_valves = dict(eff_valves)
 
@@ -108,6 +119,45 @@ class Runtime:
     def _valve_position_pct(self, tag: str) -> float:
         """Effective valve position (%) for feedback telemetry."""
         return self._last_effective_valves.get(tag, 0.0) * 100.0
+
+    # ------------------------------------------------------------------
+    # Leak detection
+    # ------------------------------------------------------------------
+    def _tank_flows(self, tag: str) -> tuple[float, float]:
+        """Measured inflow/outflow (m^3/s) for a tank from plant telemetry."""
+        f = self.plant.flows
+        if tag == "TK-101":
+            return f.get("P-101", 0.0), f.get("XV-101", 0.0)
+        if tag == "TK-102":
+            return f.get("XV-101", 0.0), f.get("XV-102", 0.0)
+        if tag == "TK-103":
+            return f.get("XV-102", 0.0), f.get("XV-103", 0.0)
+        return 0.0, 0.0
+
+    def _detect_leaks(self, dt: float) -> None:
+        """Run the mass-balance detector and raise/resolve leak events + alarms."""
+        for tag, tank in self.plant.tanks.items():
+            q_in, q_out = self._tank_flows(tag)
+            rate = self.leak_detector.update(
+                tag, level=self.plant.levels[tag], q_in=q_in, q_out=q_out,
+                overflow_volume=self.plant.overflow_volume[tag], dt=dt,
+                t=self.plant.t, area=tank.area)
+            self._last_leak_rate[tag] = rate
+            n = tag[-3:]
+            if rate >= config.LEAK_DETECT_MIN_RATE and tag not in self._active_leaks:
+                ev = self.leak_store.record(
+                    tank=tag, rate_m3s=rate,
+                    level_before=self.plant.levels[tag],
+                    source="mass-balance", alarm_tag=f"LK-{n}",
+                    t_start=self.plant.t)
+                self._active_leaks[tag] = ev.id
+                self.plc.alarms.raise_alarm(
+                    f"LK-{n}", f"{tag} leak detected (mass balance)",
+                    "HIGH", self.plc.t)
+            elif rate < config.LEAK_CLEAR_RATE and tag in self._active_leaks:
+                self.leak_store.resolve(self._active_leaks.pop(tag),
+                                        t_end=self.plant.t)
+                self.plc.alarms.clear_alarm(f"LK-{n}", self.plc.t)
 
     # ------------------------------------------------------------------
     # Trending
@@ -227,6 +277,12 @@ class Runtime:
             "manual_pump": plc.manual_pump,
             "sensors": sensors,
             "faults": faults,
+            "leaks": {
+                "injected": dict(self.leaks),
+                "disturbance_active": plant.t < self._disturbance_until,
+                "active": {tag: self._last_leak_rate.get(tag, 0.0)
+                           for tag in self._active_leaks},
+            },
             "alarms": exp["alarms"],
             "alarm_history": exp["alarm_history"],
             "interlocks": exp["interlocks"],

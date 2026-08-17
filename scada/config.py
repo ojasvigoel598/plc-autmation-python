@@ -148,7 +148,8 @@ TREND_HORIZON = 600.0   # seconds of history retained for the live trends
 LEAK_STORE_FILE = "data/leaks.json"   # relative to the repository root
 LEAK_DETECT_WINDOW = 8.0      # s : integration window for the balance check
 LEAK_DETECT_MIN_RATE = 0.0003  # m^3/s (0.3 L/s) : smallest reportable leak
-LEAK_DETECT_MIN_VOLUME = 0.002 # m^3 : cumulative unexplained loss to trip
+                               # (a rate sustained over the window implies the
+                               #  minimum reportable volume loss)
 LEAK_CLEAR_RATE = 0.0001       # m^3/s : below this a leak is considered resolved
 LEAK_HISTORY_LIMIT = 30        # latest N events surfaced to the frontend
 

@@ -14,6 +14,7 @@ control logic — it is purely the event log.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import uuid
@@ -22,8 +23,14 @@ from pathlib import Path
 
 from . import config
 
-# Repository-root-relative path so the store is stable regardless of CWD.
-STORE_PATH = Path(__file__).resolve().parent.parent / config.LEAK_STORE_FILE
+
+def _default_path() -> Path:
+    """Repository-root-relative path so the store is stable regardless of CWD.
+    `SCADA_LEAK_STORE` overrides it (used by tests to isolate the log)."""
+    env = os.environ.get("SCADA_LEAK_STORE")
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parent.parent / config.LEAK_STORE_FILE
 
 
 def severity_for(rate_m3s: float) -> str:
@@ -63,7 +70,7 @@ class LeakStore:
     empty store rather than raising, so persistence can never break the sim."""
 
     def __init__(self, path: Path | None = None) -> None:
-        self.path = Path(path) if path else STORE_PATH
+        self.path = Path(path) if path else _default_path()
         self._lock = threading.Lock()
         self._events: list[LeakEvent] = []
         self._load()
