@@ -373,6 +373,18 @@ safe state, valve-stuck detection, mass-balance leak detection and the
 persistent leak store, and the REST API (including validation and the leak
 investigation endpoints).
 
+Two regressions added by the engineering review guard against real defects
+found there: a NaN transmitter reading must propagate to the PLC (it was
+being silently clamped to full scale), and actuator `eff`/feedback must be
+the physical position, not the command (the travel watchdog previously
+compared a command to itself).
+
+`e2e_acceptance.py` runs the live server end-to-end (WebSocket telemetry,
+start, setpoint, leak inject→detect→resolve, disturbance, E-stop, unsafe-
+command rejection, recovery). It was executed **10 consecutive times with
+zero failures** — including a hard server restart midway — as the review
+acceptance gate.
+
 ## 12. Engineering limitations (simulated vs. real hardware)
 
 This is an educational simulation, **not** a certified PLC or plant model.
