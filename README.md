@@ -209,10 +209,18 @@ Two HMI frontends share the same backend:
 * **2D P&ID HMI** (legacy, kept) — `scada/static/`, served at `/` with no
   build step: SVG schematic, canvas trends, alarm table and operator panel.
 
-Both are **validated server-side** (range/type/mode checks), so the UI cannot
-drive an impossible state.  A command the PLC rejects is *shown* as rejected:
-the panel displays the operator's request vs. the enforced output and the
-active interlock reason.  Colour is never the only state signal.
+The 3D scene is **live and connected to the Python backend**: it renders
+exactly the WebSocket `state` broadcast, which originates in the process
+model and PLC scan.  There is no second simulation in the browser — pause
+the plant (STOP) and the scene freezes at its real state; change a setpoint
+or open a valve and the liquid levels, flows and alarm lights respond as
+the simulated plant and PLC react.  Two browser tabs always show identical
+plant state because there is only one simulation, owned by Python.
+
+Both HMIs are **validated server-side** (range/type/mode checks), so the UI
+cannot drive an impossible state.  A command the PLC rejects is *shown* as
+rejected: the panel displays the operator's request vs. the enforced output
+and the active interlock reason.  Colour is never the only state signal.
 
 ### Real-time schema
 
