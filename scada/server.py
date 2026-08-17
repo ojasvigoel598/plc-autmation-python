@@ -94,6 +94,11 @@ class DisturbanceRequest(BaseModel):
     duration: float = Field(default=30.0, ge=1.0, le=300.0)
 
 
+class LeakRequest(BaseModel):
+    tank: Literal["TK-101", "TK-102", "TK-103"]
+    flow_m3s: float = Field(ge=0.0, le=0.05)
+
+
 # ---------------------------------------------------------------------------
 # Simulation loop
 # ---------------------------------------------------------------------------
@@ -290,6 +295,32 @@ def create_app(start_loop: bool = True) -> FastAPI:
     async def disturbance(req: DisturbanceRequest) -> dict:
         runtime.inject_disturbance(req.tank, req.flow_m3s, req.duration)
         return {"ok": True, "tank": req.tank}
+
+    # ---- Leak investigation ---------------------------------------------
+    @app.get("/api/leaks")
+    async def list_leaks() -> dict:
+        events = runtime.leak_store.recent(config.LEAK_HISTORY_LIMIT)
+        return {"count": runtime.leak_store.count(),
+                "events": [e.as_dict() for e in events]}
+
+    @app.get("/api/leaks/latest")
+    async def latest_leak() -> dict:
+        ev = runtime.leak_store.latest()
+        return {"count": runtime.leak_store.count(),
+                "event": ev.as_dict() if ev else None}
+
+    @app.get("/api/leaks/{leak_id}")
+    async def get_leak(leak_id: str) -> JSONResponse:
+        ev = runtime.leak_store.get(leak_id)
+        if ev is None:
+            return JSONResponse(status_code=404,
+                                content={"detail": "leak not found"})
+        return JSONResponse(ev.as_dict())
+
+    @app.post("/api/faults/leak")
+    async def set_leak(req: LeakRequest) -> dict:
+        runtime.set_leak(req.tank, req.flow_m3s)
+        return {"ok": True, "tank": req.tank, "flow_m3s": req.flow_m3s}
 
     return app
 
