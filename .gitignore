@@ -41,6 +41,7 @@ env/
 *.pdf
 !docs/*.png
 !docs/*.gif
+!docs/screenshots/*.png
 
 # Project specific
 .pytest_cache/
