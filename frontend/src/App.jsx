@@ -311,9 +311,14 @@ function Overview({ config, state, selected, onSelect }) {
 /* ============================================================ */
 /* Controls tab                                                 */
 /* ============================================================ */
-function LoopFaceplate({ tag, pid, mode, disabled, send, config }) {
+function LoopFaceplate({ tag, pid, mode, disabled, send, config, manualValue, setManual }) {
   const desc = { "LIC-101": "TK-101 level → P-101 speed", "LIC-102": "TK-102 level → XV-101" }[tag];
   const manual = mode === "MANUAL";
+  const toManual = () => {
+    send("/api/control/mode", { tag, mode: "MANUAL", manual_mv: pid?.mv ?? 0 });
+    // LIC-101's effective manual output is its own register (manual_pump).
+    if (tag === "LIC-101") send("/api/control/manual_pump", { speed: pid?.mv ?? 0 });
+  };
   return (
     <div className="faceplate">
       <div className="fp-head">
@@ -322,13 +327,7 @@ function LoopFaceplate({ tag, pid, mode, disabled, send, config }) {
         <button
           className={`fp-mode ${manual ? "manual" : ""}`}
           disabled={disabled}
-          onClick={() =>
-            send("/api/control/mode", {
-              tag,
-              mode: manual ? "AUTO" : "MANUAL",
-              manual_mv: pid?.mv ?? 0,
-            })
-          }
+          onClick={() => (manual ? send("/api/control/mode", { tag, mode: "AUTO" }) : toManual())}
         >
           {manual ? "MAN" : "AUTO"}
         </button>
@@ -345,6 +344,17 @@ function LoopFaceplate({ tag, pid, mode, disabled, send, config }) {
         <CommitField label="Ki" value={pid?.ki} disabled={disabled} onCommit={(n) => send("/api/control/tuning", { tag, ki: n })} />
         <CommitField label="Kd" value={pid?.kd} disabled={disabled} onCommit={(n) => send("/api/control/tuning", { tag, kd: n })} />
       </div>
+      {manual && (
+        <label className="field">
+          <span>Manual MV — request {Math.round(manualValue ?? 0)} %</span>
+          <input
+            type="range" min="0" max="100" step="1"
+            value={Math.round(manualValue ?? 0)}
+            disabled={disabled}
+            onChange={(e) => setManual(parseFloat(e.target.value))}
+          />
+        </label>
+      )}
       {pid?.saturated && <div className="override">Output saturated at {Math.round(pid.mv)} %</div>}
     </div>
   );
@@ -396,8 +406,12 @@ function Controls({ config, state, send, demo, runDemo, cancelDemo }) {
 
       <div className="panel">
         <h3>PID loops</h3>
-        <LoopFaceplate tag="LIC-101" pid={pids["LIC-101"]} mode={loopMode["LIC-101"]} config={config} disabled={estop} send={send} />
-        <LoopFaceplate tag="LIC-102" pid={pids["LIC-102"]} mode={loopMode["LIC-102"]} config={config} disabled={estop} send={send} />
+        <LoopFaceplate tag="LIC-101" pid={pids["LIC-101"]} mode={loopMode["LIC-101"]} config={config} disabled={estop} send={send}
+          manualValue={loopMode["LIC-101"] === "MANUAL" ? state?.manual_pump ?? 0 : pids["LIC-101"]?.mv ?? 0}
+          setManual={(n) => send("/api/control/manual_pump", { speed: n })} />
+        <LoopFaceplate tag="LIC-102" pid={pids["LIC-102"]} mode={loopMode["LIC-102"]} config={config} disabled={estop} send={send}
+          manualValue={pids["LIC-102"]?.mv ?? 0}
+          setManual={(n) => send("/api/control/mode", { tag: "LIC-102", mode: "MANUAL", manual_mv: n })} />
       </div>
 
       <div className="panel">
