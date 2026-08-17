@@ -250,12 +250,36 @@ class Runtime:
         }
 
         exp = plc.export()
+
+        # Per-tank attributes (measured or directly derived), so the HMI can
+        # display every value without re-deriving physics in the frontend.
+        tanks = {}
+        for tag, tank in plant.tanks.items():
+            q_in, q_out = self._tank_flows(tag)
+            tanks[tag] = {
+                "level": levels[tag],
+                "level_pct": levels[tag] / config.TANK_HEIGHT * 100.0,
+                "volume": levels[tag] * tank.area,
+                "capacity": tank.capacity,
+                "area": tank.area,
+                "height": tank.height,
+                "z_base": tank.z_base,
+                "q_in": q_in,
+                "q_out": q_out,
+                "net_flow": q_in - q_out,
+                "leak_injected": self.leaks.get(tag, 0.0),
+                "leak_detected": self._last_leak_rate.get(tag, 0.0),
+                "leak_active": tag in self._active_leaks,
+                "overflow_volume": plant.overflow_volume.get(tag, 0.0),
+            }
+
         return {
             "t": plant.t,
             "state": plc.state,
             "estop": plc.i["I0.0_ESTOP"],
             "levels": levels,
             "levels_pct": {t: levels[t] / config.TANK_HEIGHT * 100.0 for t in levels},
+            "tanks": tanks,
             "flows": {k: v for k, v in plant.flows.items()},
             "pump": {
                 "cmd": plc.aq["P-101"],
@@ -300,6 +324,7 @@ class Runtime:
                 "area": spec["area"],
                 "height": spec["height"],
                 "z_base": spec["z_base"],
+                "capacity": spec["area"] * spec["height"],
                 "radius": round(math.sqrt(spec["area"] / math.pi), 4),
                 "x": pos.get("x", 0.0),
                 "z": pos.get("z", 0.0),

@@ -96,6 +96,19 @@ def test_snapshot_includes_interlocks(settled):
     assert s2["interlocks"]["estop"] is True
 
 
+def test_snapshot_includes_tank_attributes(settled):
+    rt = settled
+    s = rt.snapshot()
+    for tag in ("TK-101", "TK-102", "TK-103"):
+        tk = s["tanks"][tag]
+        tank = rt.plant.tanks[tag]
+        assert tk["capacity"] == pytest.approx(tank.capacity)
+        assert tk["volume"] == pytest.approx(tk["level"] * tk["area"])
+        assert tk["net_flow"] == pytest.approx(tk["q_in"] - tk["q_out"])
+        assert tk["leak_active"] is False
+        assert "leak_detected" in tk and "overflow_volume" in tk
+
+
 def test_mass_balance_over_full_run():
     rt = Runtime()
     rt.plc.pulse_start()
