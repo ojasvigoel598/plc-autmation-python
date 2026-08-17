@@ -17,7 +17,12 @@ Nothing is cosmetic. Changing a setpoint, valve, PID gain, or injecting a
 fault genuinely changes the simulated physics, the controller behaviour, and
 what the dashboard shows.
 
-![Demo response](docs/demo_response.png)
+![Live 3D digital twin — real simulation state](docs/screenshots/digital-twin-3d.png)
+
+**Live capture of the running application** (the 3D twin at `http://…:8000/app`,
+plant in `RUNNING`). Tank liquid heights, valve positions, pump state and all
+onscreen numbers are the *actual* Python simulation values streamed over
+WebSocket — nothing in this view is mocked or animated by the frontend.
 
 ---
 
