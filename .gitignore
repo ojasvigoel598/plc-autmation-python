@@ -57,6 +57,7 @@ plcpython.py
 results/
 *.log
 _server.log
+/data/
 
 # 3D digital twin (React + Three.js)
 frontend/node_modules/

@@ -140,6 +140,20 @@ TREND_HORIZON = 600.0   # seconds of history retained for the live trends
 
 
 # ---------------------------------------------------------------------------
+# Leak detection & persistent event store
+# ---------------------------------------------------------------------------
+# Leaks only occur at tanks in this plant (the `plant.leaks[tag]` mass-balance
+# term).  A mass-balance detector flags one when the measured level falls
+# faster than the measured flow balance can explain, sustained over a window.
+LEAK_STORE_FILE = "data/leaks.json"   # relative to the repository root
+LEAK_DETECT_WINDOW = 8.0      # s : integration window for the balance check
+LEAK_DETECT_MIN_RATE = 0.0003  # m^3/s (0.3 L/s) : smallest reportable leak
+LEAK_DETECT_MIN_VOLUME = 0.002 # m^3 : cumulative unexplained loss to trip
+LEAK_CLEAR_RATE = 0.0001       # m^3/s : below this a leak is considered resolved
+LEAK_HISTORY_LIMIT = 30        # latest N events surfaced to the frontend
+
+
+# ---------------------------------------------------------------------------
 # 3D scene layout (visualisation metadata, world units = metres)
 # ---------------------------------------------------------------------------
 # Positions the equipment in the 3D digital twin.  Tanks sit at y = z_base
