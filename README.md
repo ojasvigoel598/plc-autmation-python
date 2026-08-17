@@ -38,11 +38,13 @@ engine, and a live web SCADA layer in the `scada/` package.
 ## 2. System architecture
 
 ```
-                       +--------------------------------------------------+
-   Operator web UI  <->|  FastAPI backend (REST control + WebSocket data) |
-                       +------------------------+-------------------------+
-                                                |  one scan cycle / 100 ms
-                                                v
+  +------------------------------+        +-----------------------------------+
+  |  React + Three.js 3D twin    |  WS    |   FastAPI backend                 |
+  |  (SCADA panels, P&ID, trends)|<------>|   REST control  + WebSocket data  |
+  |  http://…:8000/app           |  REST  |                                   |
+  +------------------------------+        +-----------------+-----------------+
+                                                            |  one scan / 100 ms
+                                                            v
                        +--------------------------------------------------+
                        |                  RUNTIME (field bus)             |
                        |  field sensors -> PLC image -> program -> outputs|
@@ -55,6 +57,10 @@ engine, and a live web SCADA layer in the `scada/` package.
                             | PID, interlocks|     | valves, RK4 ODE |
                             +----------------+     +-----------------+
 ```
+
+The frontend is a **pure consumer of plant state**: it renders exactly what
+the WebSocket broadcasts and sends commands only through the REST pathway,
+where the Python PLC validates and (where necessary) overrides them.
 
 ### The plant
 
@@ -175,36 +181,76 @@ disturbances, keeping the mass balance tight for negligible cost.  A fixed
 step (rather than scipy's adaptive RK45) keeps the run deterministic and the
 rate separation clean.  A mass-balance check is part of the test suite.
 
-## 7. SCADA dashboard & control panel
+## 7. SCADA dashboard, control panel & 3D digital twin
 
-The frontend is a single-page, dependency-free (no CDN, no build step) HMI:
+Two HMI frontends share the same backend:
 
-* **P&ID schematic** — tanks with live fill levels, pump, valves, flow
-  direction animation, controller faceplates, alarm dots, elevation labels.
-* **Live trends** — tank levels, both loops (SP/PV/MV), and flows, on a
-  rolling window.
-* **Operator panel** — start/stop/reset/E-stop/ack, per-loop
-  AUTO/MANUAL, setpoint and Kp/Ki/Kd, manual MV, valve positions, and fault
-  injection.
-* **Alarms & events** — priority-coded active alarm table with ACK, plus an
-  event history.
+* **3D digital twin** (primary) — `frontend/`, a React + Three.js
+  (react-three-fiber) scene served at **`/app`** after a build:
+  * an interactive 3D plant whose **tank liquid height** is driven by the
+    simulated level, **pipe-flow particles** by the simulated flow rate,
+    **pump impeller** by the pump run state, and **valve discs** by the
+    actual valve position — nothing animates unless the simulation says so;
+  * alarm beacons and per-equipment highlighting driven by PLC alarm state;
+  * SCADA side panels: overview, operator controls, PID faceplates, alarms
+    (with ACK) and history, live trends, and fault injection;
+  * clicking equipment selects it and exposes its live telemetry.
+* **2D P&ID HMI** (legacy, kept) — `scada/static/`, served at `/` with no
+  build step: SVG schematic, canvas trends, alarm table and operator panel.
 
-Every control is validated server-side (range/type/mode checks), so the UI
-cannot drive an impossible state.  Colour is never the only state signal:
-state is also shown as text/badges.
+Both are **validated server-side** (range/type/mode checks), so the UI cannot
+drive an impossible state.  A command the PLC rejects is *shown* as rejected:
+the panel displays the operator's request vs. the enforced output and the
+active interlock reason.  Colour is never the only state signal.
+
+### Real-time schema
+
+The WebSocket pushes three message types: `config` (plant topology + 3D
+layout), `state` (levels, flows, pump/valve/PID/interlock/alarm state), and
+`trends` (downsampled history).  Commands use a separate REST pathway
+(`/api/control/*`, `/api/faults/*`).  The client handles reconnect with
+exponential backoff, malformed-message drops, and stale-state recovery.
 
 ## 8. Install & run
 
-Requires Python 3.10+.
+Requires Python 3.10+ (backend) and Node 18+ (only to *build* the 3D twin;
+the built bundle is served by FastAPI, so end users do not need Node).
 
 ```bash
 pip install -r requirements.txt          # runtime
 pip install -r requirements-dev.txt      # + pytest/httpx for tests
+
+# optional: build the 3D digital twin (a prebuilt dist/ may be committed)
+cd frontend && npm install && npm run build && cd ..
+
 python run_scada.py                      # http://127.0.0.1:8000
 ```
 
+* **3D digital twin** → http://127.0.0.1:8000/app
+* **2D P&ID HMI** → http://127.0.0.1:8000/
+
 `run_scada.py --speed 2.0` runs the simulation twice as fast as wall-clock
 (useful for demos).
+
+### Frontend development (hot reload)
+
+```bash
+python run_scada.py        # terminal 1: backend on :8000
+cd frontend && npm run dev # terminal 2: Vite on http://localhost:5173
+```
+
+Vite proxies `/api` and `/ws` to the backend, so `localhost:5173` sees the
+live plant with hot module reload.
+
+### Web deployment (honest scope)
+
+The **simulation runs in Python**, so it cannot execute in a static browser
+page alone.  The static frontend can be served from any host (CDN, S3,
+GitHub Pages), but the FastAPI process — which owns the plant state, PLC
+logic and PID — must be reachable at a public URL.  Deploy the backend on a
+VPS / container host (the whole thing Dockerises cleanly) and point the
+frontend at its `/api` and `/ws` origins.  See `frontend/vite.config.js` for
+the dev proxy and `scada/server.py` for the production static mount.
 
 ## 9. Operating the simulation
 
@@ -268,9 +314,10 @@ reflected in the operating-state machine above.
 
 * Cascade or feed-forward control, gain scheduling.
 * OPC UA / Modbus TCP gateway to a real PLC or SCADA historian.
-* More unit operations (heat exchanger, pressure loop).
-* Packaged as a Docker image.
+* More unit operations (heat exchanger, pressure loop, conveyor).
+* Packaged as a Docker image with a one-command `docker compose up`.
 * Persist trends/alarms to a time-series database.
+* WebXR/VR walkthrough of the 3D plant.
 
 ## License
 

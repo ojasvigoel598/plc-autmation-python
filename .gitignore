@@ -57,3 +57,10 @@ plcpython.py
 results/
 *.log
 _server.log
+
+# 3D digital twin (React + Three.js)
+frontend/node_modules/
+frontend/dist/
+
+# Portable Node toolchain used for the frontend build
+/tools/

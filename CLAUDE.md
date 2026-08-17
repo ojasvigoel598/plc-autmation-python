@@ -24,17 +24,26 @@ from the simulation.
 ```
 run_scada.py                 # entry point: uvicorn scada.server:app
 scada/
-  config.py                  # ALL engineering constants (SI units)
+  config.py                  # ALL engineering constants (SI units) + 3D layout
   process.py                 # plant model: tanks, valves, pump, transmitters, RK4
   pid.py                     # PID controller (anti-windup, bumpless, deriv-on-measurement)
   plc.py                     # IEC 61131-3 FBs, alarm manager, PLC scan engine
   runtime.py                 # field bus: sensors -> PLC -> actuators -> plant
-  server.py                  # FastAPI: REST control + WebSocket telemetry
-  static/                    # SCADA HMI (vanilla HTML/CSS/JS, no build step)
+  server.py                  # FastAPI: REST control + WebSocket telemetry + /app mount
+  static/                    # 2D P&ID HMI (vanilla, no build step) at /
+frontend/                    # React + Three.js 3D digital twin (built -> /app)
+  src/sim.js                 # WS client (reconnect) + REST command pathway
+  src/PlantScene.jsx         # 3D plant driven ONLY by simulation state
+  src/App.jsx                # SCADA panels, controls, alarms, trends, faults
 tests/                       # pytest: physics, PID, PLC, closed loop, API
 docs/generate_demo_figure.py # regenerates docs/demo_response.png
 main.py + legacy modules     # ORIGINAL matplotlib demo (superseded, keep intact)
 ```
+
+The **3D twin is a pure visual consumer of plant state**: it reads the
+`config`/`state`/`trends` WebSocket messages and sends commands only through
+REST (`/api/control/*`, `/api/faults/*`).  Never add a second simulation in
+JavaScript, and never let the frontend mutate plant state directly.
 
 ## Engineering conventions (do not violate)
 
@@ -79,8 +88,9 @@ Changing Kp/Ki/Kd/SP/MV in the UI must change controller behaviour.
 ## Testing & verification (mandatory before finishing any change)
 
 ```bash
-python -m pytest tests/ -q          # must pass (currently 45 tests)
+python -m pytest tests/ -q          # must pass (currently 47 tests)
 python run_scada.py                 # server on http://127.0.0.1:8000
+cd frontend && npm run build        # rebuild the 3D twin (served at /app)
 ```
 
 Verify at minimum: REST endpoints validate bad input (422), WebSocket
@@ -101,9 +111,28 @@ intermittent/race issues.
 - Never force-push unless explicitly told to.
 - Keep the README in sync with the actual implementation.
 
+## Frontend rules
+
+- **Single source of truth.** The 3D scene maps `state` -> geometry; a tank's
+  liquid height, a pipe's flow particles, a pump's impeller, and a valve's
+  disc all derive from the WebSocket `state`.  No decorative/idle animations.
+- **Commands never bypass the PLC.** All interactions go through `sendCommand`
+  (REST); the PLC decides, and the UI renders `request` vs enforced `output`
+  vs actual `eff`, plus `interlockReason(state)`.
+- **Data-driven scene.** Equipment positions/topology come from `/api/plant_config`
+  (`config.LAYOUT`), so the scene adapts if the plant changes.  Do not
+  hard-code tag/position maps in JSX when the config already provides them.
+- **Build before release.** `npm run build` must succeed (Vite) and the
+  output is served by FastAPI at `/app` (asset base is `/app/`).
+- Frontend deps live in `frontend/package.json`; no CDN, no global three.js
+  script tag.  `frontend/node_modules/`, `frontend/dist/`, and `/tools/` are
+  gitignored.
+
 ## Dependencies
 
-Runtime: `numpy`, `fastapi`, `uvicorn`, `pydantic`, `websockets`,
-`matplotlib` (legacy modules only).  Dev: `pytest`, `httpx`.  No new
-dependency without adding it to `requirements.txt` / `requirements-dev.txt`
-and verifying it installs and imports in the project's Python environment.
+Runtime (Python): `numpy`, `fastapi`, `uvicorn`, `pydantic`, `websockets`,
+`matplotlib` (legacy modules only).  Dev: `pytest`, `httpx`.  Frontend:
+`react`, `react-dom`, `three`, `@react-three/fiber`, `@react-three/drei`,
+`vite`, `@vitejs/plugin-react`.  No new dependency without adding it to
+`requirements.txt` / `requirements-dev.txt` / `frontend/package.json` and
+verifying it installs and imports in the project's actual environment.
