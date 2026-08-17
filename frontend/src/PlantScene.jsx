@@ -183,6 +183,16 @@ function Tank({ tank, state, selected, alarmColor, onSelect }) {
       onPointerOver={() => (document.body.style.cursor = "pointer")}
       onPointerOut={() => (document.body.style.cursor = "auto")}
     >
+      {/* support legs from the tank base down to the pad */}
+      {[0, 1, 2, 3].map((i) => {
+        const ang = (i / 4) * Math.PI * 2;
+        return (
+          <mesh key={i} position={[Math.cos(ang) * radius * 1.02, -z_base / 2, Math.sin(ang) * radius * 1.02]}>
+            <cylinderGeometry args={[0.05, 0.055, z_base, 8]} />
+            <meshStandardMaterial color={STEEL} roughness={0.6} metalness={0.5} />
+          </mesh>
+        );
+      })}
       {/* liquid */}
       {liquidH > 0.002 && (
         <mesh position={[0, liquidH / 2, 0]}>
@@ -237,6 +247,13 @@ function Valve({ valve, state, selected, onSelect }) {
         <cylinderGeometry args={[0.15, 0.15, 0.34, 16]} />
         <meshStandardMaterial color={STEEL} roughness={0.5} metalness={0.5} />
       </mesh>
+      {/* flanged connections to the pipework */}
+      {[-1, 1].map((s) => (
+        <mesh key={s} position={[s * 0.19, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.2, 0.2, 0.05, 16]} />
+          <meshStandardMaterial color={STEEL} roughness={0.5} metalness={0.55} />
+        </mesh>
+      ))}
       {/* actuator stem */}
       <mesh position={[0, 0.22, 0]}>
         <cylinderGeometry args={[0.045, 0.045, 0.34, 10]} />
@@ -283,6 +300,11 @@ function Pump({ pump, state, selected, onSelect }) {
       onPointerOver={() => (document.body.style.cursor = "pointer")}
       onPointerOut={() => (document.body.style.cursor = "auto")}
     >
+      {/* base plate / skid */}
+      <mesh position={[0, -0.4, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.72, 0.1, 0.5]} />
+        <meshStandardMaterial color="#3d4b5c" roughness={0.7} metalness={0.3} />
+      </mesh>
       {/* motor body */}
       <mesh>
         <cylinderGeometry args={[0.34, 0.34, 0.55, 20]} />
@@ -375,11 +397,12 @@ export default function PlantScene({ config, state, selected, onSelect }) {
   return (
     <Canvas shadows camera={{ position: [4, 8, 20], fov: 45 }} gl={{ antialias: true }}>
       <color attach="background" args={["#07090d"]} />
-      <ambientLight intensity={0.5} />
-      <hemisphereLight args={["#8fb0d8", "#0a0e14", 0.5]} />
+      <fog attach="fog" args={["#07090d", 24, 70]} />
+      <ambientLight intensity={0.55} />
+      <hemisphereLight args={["#8fb0d8", "#0a0e14", 0.55]} />
       <directionalLight
         position={[12, 20, 10]}
-        intensity={1.5}
+        intensity={1.6}
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
@@ -388,6 +411,8 @@ export default function PlantScene({ config, state, selected, onSelect }) {
         shadow-camera-top={30}
         shadow-camera-bottom={-10}
       />
+      {/* cool fill light from the back so the equipment never goes flat black */}
+      <directionalLight position={[-10, 8, -14]} intensity={0.35} color="#9fb8d8" />
       <OrbitControls
         target={[3.5, 1.6, 0]}
         maxPolarAngle={Math.PI * 0.49}
@@ -409,6 +434,11 @@ export default function PlantScene({ config, state, selected, onSelect }) {
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[3, -0.04, 0]} receiveShadow>
         <planeGeometry args={[80, 80]} />
         <meshStandardMaterial color="#0a0e14" roughness={0.9} />
+      </mesh>
+      {/* concrete equipment pad (containment plinth under the train) */}
+      <mesh position={[3, -0.14, 0]} receiveShadow>
+        <boxGeometry args={[31, 0.16, 9]} />
+        <meshStandardMaterial color="#131b26" roughness={0.85} metalness={0.15} />
       </mesh>
 
       {/* pipes */}
