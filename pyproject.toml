@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plc-scada-sim"
+version = "1.0.0"
+description = "Browser-based multi-tank PLC/SCADA digital twin: Python process simulation, IEC 61131-3-style PLC engine, PID control, Modbus TCP field interface, SQLite historian, and a React/Three.js HMI."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT License" }
+authors = [{ name = "PLC Automation Python Contributors" }]
+keywords = [
+    "plc",
+    "scada",
+    "pid",
+    "digital-twin",
+    "modbus",
+    "simulation",
+    "iec-61131-3",
+    "control-systems",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Education",
+    "Intended Audience :: Manufacturing",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Process Control",
+]
+dependencies = [
+    "numpy>=1.20",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pydantic>=2.5",
+    "websockets>=12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+plc-scada-sim = "scada.cli:main"
+
+[tool.setuptools]
+packages = ["scada"]
+
+[tool.setuptools.package-data]
+scada = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
