@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import config
+from .historian import TrendStore
 from .modbus_server import ModbusServer
 from .runtime import Runtime
 
@@ -46,6 +47,7 @@ client_tasks: dict[WebSocket, asyncio.Task] = {}
 MAX_QUEUE = 128
 loop_task: asyncio.Task | None = None
 modbus_server: ModbusServer | None = None
+trend_store: TrendStore | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +174,9 @@ async def _sim_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global loop_task, modbus_server
+    global loop_task, modbus_server, trend_store
+    trend_store = TrendStore()
+    runtime.historian = trend_store
     loop_task = asyncio.create_task(_sim_loop())
     if config.MODBUS_ENABLED:
         modbus_server = ModbusServer(lambda: runtime.plc,
@@ -192,6 +196,11 @@ async def lifespan(app: FastAPI):
         if modbus_server is not None:
             modbus_server.stop()
             modbus_server = None
+        runtime.flush_historian()
+        runtime.historian = None
+        if trend_store is not None:
+            trend_store.close()
+            trend_store = None
         loop_task.cancel()
         try:
             await loop_task
