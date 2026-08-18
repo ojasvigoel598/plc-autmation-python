@@ -30,6 +30,10 @@ scada/
   plc.py                     # IEC 61131-3 FBs, alarm manager, PLC scan engine
   leakdetect.py              # mass-balance leak detector (tanks only)
   leaks.py                   # LeakEvent + file-backed persistent store (data/leaks.json)
+  historian.py               # SQLite trend store (data/trends.sqlite3), stdlib
+  modbus_map.py              # Modbus register map + scaling for the PLC I/O image
+  modbus_server.py           # stdlib Modbus TCP server (FC 0x01..0x10)
+  cli.py                     # plc-scada-sim console entry point
   runtime.py                 # field bus: sensors -> PLC -> actuators -> plant
   server.py                  # FastAPI: REST control + WebSocket telemetry + /app mount
   static/                    # 2D P&ID HMI (vanilla, no build step) at /
