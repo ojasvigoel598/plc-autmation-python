@@ -152,6 +152,7 @@ MODBUS_PORT = 502
 # term).  A mass-balance detector flags one when the measured level falls
 # faster than the measured flow balance can explain, sustained over a window.
 LEAK_STORE_FILE = "data/leaks.json"   # relative to the repository root
+TREND_STORE_FILE = "data/trends.sqlite3"  # SQLite historian (relative to root)
 LEAK_DETECT_WINDOW = 8.0      # s : integration window for the balance check
 LEAK_DETECT_MIN_RATE = 0.0003  # m^3/s (0.3 L/s) : smallest reportable leak
                                # (a rate sustained over the window implies the
