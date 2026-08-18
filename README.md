@@ -462,6 +462,11 @@ reflected in the operating-state machine above.
   commercial virtual-commissioning tooling and the digital-twin literature:
   top strengths, real-scale improvements, honest weaknesses.
 * `docs/screenshots/digital-twin-3d.png` — live capture of the 3D twin.
+* `scada/modbus_map.py` + `scada/modbus_server.py` — the Modbus TCP field
+  interface and its register map (stdlib-only).
+* `scada/historian.py` — the SQLite trend store backing `/api/trends/history`.
+* `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` — contributor, security,
+  and community guidelines for open-source use.
 
 ## 13. Future improvements
 
