@@ -1,0 +1,23 @@
+# One-command bring-up of the whole digital twin:
+#
+#   docker compose up --build
+#
+# Browser HMI:        http://localhost:8000/app
+# Modbus TCP server:  localhost:502
+
+services:
+  scada:
+    build: .
+    image: plc-scada-sim
+    ports:
+      - "8000:8000"   # REST / WebSocket / 3D HMI
+      - "502:502"     # Modbus TCP field interface
+    volumes:
+      - scada-data:/app/data
+    restart: unless-stopped
+    environment:
+      # Override via a .env file if you need a different bind port.
+      MODBUS_PORT: "502"
+
+volumes:
+  scada-data:
