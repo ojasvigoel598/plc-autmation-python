@@ -400,7 +400,9 @@ This is an educational simulation, **not** a certified PLC or plant model.
   instruments), so it is deterministic; a real installation would use
   measured values and therefore need larger thresholds.  Leaks are modelled
   at tanks only.
-* No OPC UA / Modbus communication to a real PLC.
+* A Modbus TCP **server** exposes the simulated I/O image to external SCADA/
+  historian clients, but there is still no OPC UA and the simulator cannot
+  yet drive a real physical PLC.
 
 `PLC2Skill` (an ontology tool for mapping IEC 61131-3 code to skill models)
 was evaluated and is **not used** here: it targets real PLCopen XML / OPC UA
