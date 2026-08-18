@@ -319,6 +319,29 @@ FastAPI backend on `python:3.12-slim`.  The browser HMI is at
 http://localhost:8000/app and the Modbus TCP server is published on port 502.
 A named volume persists leak events and SQLite trends across restarts.
 
+### Install as a Python library
+
+The `scada` package is pip-installable, so another project can embed the
+simulation and drive it programmatically without the browser HMI:
+
+```bash
+pip install -e .            # or: pip install plc-scada-sim
+plc-scada-sim --host 0.0.0.0 --port 8000
+```
+
+```python
+from scada.runtime import Runtime
+from scada.modbus_server import ModbusServer
+
+rt = Runtime()
+for _ in range(100):
+    rt.step()                    # one PLC scan cycle each call
+print(rt.snapshot()["levels"])   # real simulated state, no UI required
+```
+
+The console script runs the full server; the package exports the same PLC,
+PID, process, Modbus, and historian modules the server uses.
+
 ### Frontend development (hot reload)
 
 ```bash
