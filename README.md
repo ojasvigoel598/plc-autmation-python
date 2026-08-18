@@ -462,11 +462,10 @@ reflected in the operating-state machine above.
 ## 13. Future improvements
 
 * Cascade or feed-forward control, gain scheduling.
-* OPC UA / Modbus TCP gateway to a real PLC or SCADA historian.
+* OPC UA gateway (the Modbus TCP server is already included).
 * Extend the leak model to pipes and valves (currently tanks only).
 * More unit operations (heat exchanger, pressure loop, conveyor).
-* Packaged as a Docker image with a one-command `docker compose up`.
-* Persist trends/alarms to a time-series database.
+* Persist alarms to the historian (trends already persist to SQLite).
 * WebXR/VR walkthrough of the 3D plant.
 
 ## License
