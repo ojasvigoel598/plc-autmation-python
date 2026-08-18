@@ -243,6 +243,27 @@ def create_app(start_loop: bool = True) -> FastAPI:
     async def get_trends() -> JSONResponse:
         return JSONResponse(runtime.trends(400))
 
+    @app.get("/api/trends/history/series")
+    async def get_history_series() -> JSONResponse:
+        store = runtime.historian
+        return JSONResponse({"series": store.series() if store else []})
+
+    @app.get("/api/trends/history")
+    async def get_history(series: str, t0: float | None = None,
+                          t1: float | None = None,
+                          max_points: int = 400) -> JSONResponse:
+        store = runtime.historian
+        if store is None:
+            return JSONResponse({"series": series, "range": None, "points": []})
+        rng = store.time_range(series)
+        if rng is None:
+            return JSONResponse({"series": series, "range": None, "points": []})
+        lo = rng[0] if t0 is None else t0
+        hi = rng[1] if t1 is None else t1
+        points = store.range(series, lo, hi, max(1, min(20000, max_points)))
+        return JSONResponse({"series": series, "range": rng,
+                             "points": [[t, v] for t, v in points]})
+
     @app.get("/api/plant_config")
     async def get_plant_config() -> JSONResponse:
         return JSONResponse(runtime.plant_config())
