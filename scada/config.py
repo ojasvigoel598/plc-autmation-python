@@ -160,6 +160,11 @@ LEAK_DETECT_MIN_RATE = 0.0003  # m^3/s (0.3 L/s) : smallest reportable leak
 LEAK_CLEAR_RATE = 0.0001       # m^3/s : below this a leak is considered resolved
 LEAK_HISTORY_LIMIT = 30        # latest N events surfaced to the frontend
 
+# Historian flush cadence: full-resolution samples are buffered in memory and
+# written to SQLite once per this many scans (10 scans == 1 s at 10 Hz) so the
+# sim loop never blocks on a per-sample disk write.
+HISTORIAN_FLUSH_SCANS = 10
+
 
 # ---------------------------------------------------------------------------
 # 3D scene layout (visualisation metadata, world units = metres)
