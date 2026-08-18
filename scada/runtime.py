@@ -21,6 +21,7 @@ import time
 from collections import deque
 
 from . import config
+from .historian import TrendStore
 from .leakdetect import MassBalanceLeakDetector
 from .leaks import LeakStore
 from .plc import PLC
@@ -31,13 +32,18 @@ PUMP_FB_THRESHOLD = 0.001  # m^3/s
 
 
 class Runtime:
-    def __init__(self, leak_store: LeakStore | None = None) -> None:
+    def __init__(self, leak_store: LeakStore | None = None,
+                 historian: TrendStore | None = None) -> None:
         # Serialises the sim-loop thread against the Modbus server thread so
         # a remote register write never interleaves with a PLC scan.
         self.field_lock = threading.RLock()
 
         self.plant = Plant()
         self.plc = PLC()
+
+        # Durable trend persistence (optional: None disables it, e.g. tests).
+        self.historian = historian
+        self._pending_history: list[dict] = []
 
         # Field-device fault state.
         self.pump_tripped = False
@@ -188,6 +194,21 @@ class Runtime:
             "overflow": plant.flows.get("overflow", 0.0),
         }
         self.history.append(rec)
+
+        if self.historian is not None:
+            self._pending_history.append(rec)
+            if len(self._pending_history) >= config.HISTORIAN_FLUSH_SCANS:
+                self.flush_historian()
+
+    # ------------------------------------------------------------------
+    # Historian
+    # ------------------------------------------------------------------
+    def flush_historian(self) -> None:
+        """Write any buffered full-resolution samples to the durable store."""
+        if self.historian is None or not self._pending_history:
+            return
+        self.historian.insert(self._pending_history)
+        self._pending_history.clear()
 
     # ------------------------------------------------------------------
     # Fault injection (field devices)
