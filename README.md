@@ -305,7 +305,19 @@ python run_scada.py                      # http://127.0.0.1:8000
 * **2D P&ID HMI** → http://127.0.0.1:8000/
 
 `run_scada.py --speed 2.0` runs the simulation twice as fast as wall-clock
-(useful for demos).
+(useful for demos).  `--modbus-port` and `--no-modbus` control the Modbus TCP
+field interface.
+
+### Run with Docker
+
+```bash
+docker compose up --build
+```
+
+The image builds the React/Three.js twin with Node, then packages it with the
+FastAPI backend on `python:3.12-slim`.  The browser HMI is at
+http://localhost:8000/app and the Modbus TCP server is published on port 502.
+A named volume persists leak events and SQLite trends across restarts.
 
 ### Frontend development (hot reload)
 
