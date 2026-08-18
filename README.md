@@ -406,7 +406,11 @@ ack/clear, the operating state machine, E-stop authority, sensor fault
 latching, HIHI interlock, setpoint tracking, disturbance rejection, pump-trip
 safe state, valve-stuck detection, mass-balance leak detection and the
 persistent leak store, and the REST API (including validation and the leak
-investigation endpoints).
+investigation endpoints).  It also covers the Modbus TCP server (register
+map scaling, write routing through PLC setters, read-only output protection,
+and wire round-trips), the SQLite historian (batching, range queries, and
+the `/api/trends/history` endpoints), and the packaging metadata/console
+entry point.
 
 Two regressions added by the engineering review guard against real defects
 found there: a NaN transmitter reading must propagate to the PLC (it was
