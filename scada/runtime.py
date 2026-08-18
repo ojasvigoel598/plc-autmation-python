@@ -241,6 +241,12 @@ class Runtime:
     # Snapshot for the SCADA layer
     # ------------------------------------------------------------------
     def snapshot(self) -> dict:
+        """Consistent read of the whole plant/PLC state (lock-protected)."""
+        with self.field_lock:
+            return self._snapshot()
+
+    def _snapshot(self) -> dict:
+        """Unlocked snapshot builder.  Caller must hold ``field_lock``."""
         plant = self.plant
         plc = self.plc
         levels = plant.read_levels()
