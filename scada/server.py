@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import config
+from .modbus_server import ModbusServer
 from .runtime import Runtime
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -44,6 +45,7 @@ client_queues: dict[WebSocket, asyncio.Queue] = {}
 client_tasks: dict[WebSocket, asyncio.Task] = {}
 MAX_QUEUE = 128
 loop_task: asyncio.Task | None = None
+modbus_server: ModbusServer | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -170,11 +172,26 @@ async def _sim_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global loop_task
+    global loop_task, modbus_server
     loop_task = asyncio.create_task(_sim_loop())
+    if config.MODBUS_ENABLED:
+        modbus_server = ModbusServer(lambda: runtime.plc,
+                                     host=config.MODBUS_HOST,
+                                     port=config.MODBUS_PORT,
+                                     lock=runtime.field_lock)
+        try:
+            modbus_server.start()
+        except OSError as exc:
+            # A busy/privileged port must not take the whole app down: the
+            # browser HMI still works, only the field interface is absent.
+            logger.warning("Modbus TCP server failed to bind: %s", exc)
+            modbus_server = None
     try:
         yield
     finally:
+        if modbus_server is not None:
+            modbus_server.stop()
+            modbus_server = None
         loop_task.cancel()
         try:
             await loop_task
