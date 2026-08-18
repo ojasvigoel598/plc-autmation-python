@@ -134,6 +134,18 @@ SENSOR_RATE_LIMIT = 0.50   # m/s : implausible rate-of-change trips a sensor fau
 
 
 # ---------------------------------------------------------------------------
+# Modbus TCP field interface
+# ---------------------------------------------------------------------------
+# A zero-dependency Modbus TCP server (scada.modbus_server) exposes the PLC
+# I/O image so real SCADA/historian/PLC clients can attach.  Port 502 is the
+# standard Modbus TCP port; it is privileged on some OSes, so the launch
+# script lets an operator override it.
+MODBUS_ENABLED = True
+MODBUS_HOST = "0.0.0.0"
+MODBUS_PORT = 502
+
+
+# ---------------------------------------------------------------------------
 # Leak detection & persistent event store
 # ---------------------------------------------------------------------------
 # Leaks only occur at tanks in this plant (the `plant.leaks[tag]` mass-balance
