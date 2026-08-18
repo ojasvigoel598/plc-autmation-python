@@ -113,6 +113,13 @@ class ModbusServer:
     def running(self) -> bool:
         return self._server is not None
 
+    @property
+    def bound_port(self) -> int | None:
+        """The actual TCP port (useful when started on an ephemeral port 0)."""
+        if self._server is None:
+            return None
+        return self._server.server_address[1]
+
     # -- PLC access (serialised against the sim loop) ---------------------
     def _plc(self):
         plc = self._plc_getter()
