@@ -43,6 +43,10 @@ FC_READ_COILS = 0x01
 FC_READ_DISCRETE = 0x02
 FC_READ_HOLDING = 0x03
 FC_READ_INPUT = 0x04
+FC_WRITE_COIL = 0x05
+FC_WRITE_REGISTER = 0x06
+FC_WRITE_COILS = 0x0F
+FC_WRITE_REGISTERS = 0x10
 
 # Exception codes
 EX_ILLEGAL_FUNCTION = 0x01
@@ -134,6 +138,14 @@ class ModbusServer:
             return self._read_holding(pdu)
         if fc == FC_READ_INPUT:
             return self._read_input(pdu)
+        if fc == FC_WRITE_COIL:
+            return self._write_coil(pdu)
+        if fc == FC_WRITE_REGISTER:
+            return self._write_register(pdu)
+        if fc == FC_WRITE_COILS:
+            return self._write_coils(pdu)
+        if fc == FC_WRITE_REGISTERS:
+            return self._write_registers(pdu)
         raise ModbusError(EX_ILLEGAL_FUNCTION)
 
     # -- read handlers ----------------------------------------------------
@@ -172,6 +184,58 @@ class ModbusServer:
             return self._read_registers_response(FC_READ_INPUT, table, start, count)
         finally:
             self._release()
+
+    # -- write handlers (routed through the PLC's validated setters) -----
+    def _write_coil(self, pdu: bytes) -> bytes:
+        # Coils (Q image) are read-only: the PLC, not a remote master, owns
+        # the digital outputs.
+        raise ModbusError(EX_ILLEGAL_ADDRESS)
+
+    def _write_coils(self, pdu: bytes) -> bytes:
+        raise ModbusError(EX_ILLEGAL_ADDRESS)
+
+    def _write_register(self, pdu: bytes) -> bytes:
+        if len(pdu) != 5:
+            raise ModbusError(EX_ILLEGAL_VALUE)
+        addr, value = struct.unpack(">Hh", pdu[1:5])
+        plc = self._plc()
+        try:
+            accepted = mm.write_holding_register(plc, addr, value)
+        except LookupError:
+            raise ModbusError(EX_ILLEGAL_ADDRESS)
+        except ValueError:
+            raise ModbusError(EX_ILLEGAL_VALUE)
+        finally:
+            self._release()
+        return bytes([FC_WRITE_REGISTER]) + struct.pack(">Hh", addr, accepted)
+
+    def _write_registers(self, pdu: bytes) -> bytes:
+        if len(pdu) < 6:
+            raise ModbusError(EX_ILLEGAL_VALUE)
+        addr, count, bytecount = struct.unpack(">HHB", pdu[1:6])
+        if bytecount != count * 2 or len(pdu) != 6 + bytecount:
+            raise ModbusError(EX_ILLEGAL_VALUE)
+        values = struct.unpack(f">{count}h", pdu[6:6 + bytecount])
+
+        plc = self._plc()
+        try:
+            # Validate the whole range first so a bad address cannot leave a
+            # half-applied write behind.
+            for i in range(count):
+                kind, _tag, _scale, writable = mm.HOLDING_REGISTERS[addr + i]
+                if not writable:
+                    raise ModbusError(EX_ILLEGAL_ADDRESS)
+            for i, value in enumerate(values):
+                mm.write_holding_register(plc, addr + i, value)
+        except IndexError:
+            raise ModbusError(EX_ILLEGAL_ADDRESS)
+        except LookupError:
+            raise ModbusError(EX_ILLEGAL_ADDRESS)
+        except ValueError:
+            raise ModbusError(EX_ILLEGAL_VALUE)
+        finally:
+            self._release()
+        return bytes([FC_WRITE_REGISTERS]) + struct.pack(">HH", addr, count)
 
     # -- request/response helpers -----------------------------------------
     @staticmethod
