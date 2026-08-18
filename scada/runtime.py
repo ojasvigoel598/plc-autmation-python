@@ -63,7 +63,12 @@ class Runtime:
     # Scan cycle
     # ------------------------------------------------------------------
     def step(self, dt: float = config.PLC_SCAN_DT) -> dict:
-        """Advance one PLC scan cycle."""
+        """Advance one PLC scan cycle (serialised against the field bus)."""
+        with self.field_lock:
+            return self._step(dt)
+
+    def _step(self, dt: float) -> dict:
+        """One scan cycle.  The caller must hold ``field_lock``."""
         plc = self.plc
         plant = self.plant
 
