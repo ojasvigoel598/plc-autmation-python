@@ -16,6 +16,7 @@ tool or a physical failure) and observed by the PLC through its I/O image.
 from __future__ import annotations
 
 import math
+import threading
 import time
 from collections import deque
 
@@ -31,6 +32,10 @@ PUMP_FB_THRESHOLD = 0.001  # m^3/s
 
 class Runtime:
     def __init__(self, leak_store: LeakStore | None = None) -> None:
+        # Serialises the sim-loop thread against the Modbus server thread so
+        # a remote register write never interleaves with a PLC scan.
+        self.field_lock = threading.RLock()
+
         self.plant = Plant()
         self.plc = PLC()
 
