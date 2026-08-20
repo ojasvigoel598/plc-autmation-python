@@ -304,6 +304,10 @@ python run_scada.py                      # http://127.0.0.1:8000
 * **3D digital twin** → http://127.0.0.1:8000/app
 * **2D P&ID HMI** → http://127.0.0.1:8000/
 
+For **permanent public URLs** that anyone can open from anywhere — even when
+this laptop is off — deploy to Render with the included `render.yaml`
+Blueprint (one-click, free tier).  See `docs/DEPLOYMENT.md`.
+
 `run_scada.py --speed 2.0` runs the simulation twice as fast as wall-clock
 (useful for demos).  `--modbus-port` and `--no-modbus` control the Modbus TCP
 field interface.
@@ -357,10 +361,25 @@ live plant with hot module reload.
 The **simulation runs in Python**, so it cannot execute in a static browser
 page alone.  The static frontend can be served from any host (CDN, S3,
 GitHub Pages), but the FastAPI process — which owns the plant state, PLC
-logic and PID — must be reachable at a public URL.  Deploy the backend on a
-VPS / container host (the whole thing Dockerises cleanly) and point the
-frontend at its `/api` and `/ws` origins.  See `frontend/vite.config.js` for
-the dev proxy and `scada/server.py` for the production static mount.
+logic and PID — must be reachable at a public URL.
+
+**One-click permanent deploy (free):** the repo includes a `render.yaml`
+Blueprint.  Push to GitHub, then in the Render dashboard use **New+ →
+Blueprint** and pick this repository.  You get permanent public URLs that
+work even while your laptop is off:
+
+| HMI | Permanent URL |
+|-----|---------------|
+| 3D digital twin | `https://plc-scada-sim.onrender.com/app` |
+| 2D P&ID HMI | `https://plc-scada-sim.onrender.com/` |
+
+The service listens on the standard `PORT` env var (see `scada/cli.py`), so
+no start command is needed.  A free UptimeRobot monitor pinging
+`/api/state` keeps the free instance warm (no cold-start delay).  Full
+steps, alternatives (Fly.io, VPS) and security notes are in
+`docs/DEPLOYMENT.md`.  For local frontend development, see
+`frontend/vite.config.js` for the dev proxy and `scada/server.py` for the
+production static mount.
 
 ## 10. Operating the simulation
 

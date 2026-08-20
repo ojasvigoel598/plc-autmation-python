@@ -1,0 +1,31 @@
+# Render Blueprint — deploy the whole SCADA digital twin as a permanent,
+# always-on public web service straight from this GitHub repo.
+#
+# Deploy (one click, free tier):
+#   1. Make sure this repo is pushed to GitHub.
+#   2. Open https://dashboard.render.com  →  New+  →  Blueprint.
+#   3. Pick this repository. Render reads this file and creates the service.
+#   4. Done. Your permanent public URLs are
+#        https://<service-name>.onrender.com/      (2D P&ID HMI)
+#        https://<service-name>.onrender.com/app   (3D digital twin)
+#
+# The free plan spins the service down after ~15 min without traffic; the
+# first request after that wakes it in ~30–60 s. A free UptimeRobot monitor
+# pinging /api/state every 5 min keeps it warm (see docs/DEPLOYMENT.md).
+#
+# The app reads the standard $PORT env var (see scada/cli.py), so no start
+# command is needed here — Render's routing port is picked up automatically.
+
+services:
+  - type: web
+    name: plc-scada-sim
+    runtime: docker
+    repo: https://github.com/ojasvigoel598/plc-autmation-python
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /api/state
+    # Persist leak events + SQLite trends so history survives redeploys.
+    disk:
+      name: scada-data
+      mountPath: /app/data
+      sizeGB: 1

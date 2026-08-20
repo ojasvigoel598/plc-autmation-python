@@ -36,6 +36,8 @@ RUN mkdir -p /app/data
 VOLUME ["/app/data"]
 
 # 8000 = browser HMI/REST/WebSocket, 502 = Modbus TCP field interface.
+# The port is taken from the standard $PORT env var when set (Render, Fly.io,
+# Railway) and defaults to 8000 otherwise (docker compose, local runs).
 EXPOSE 8000 502
 
-CMD ["python", "run_scada.py", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "run_scada.py", "--host", "0.0.0.0"]
