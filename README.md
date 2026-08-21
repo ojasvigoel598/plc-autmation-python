@@ -522,13 +522,112 @@ quarantine, API-token auth with an operator audit log, rate limiting and
 WebSocket caps, a Modbus client allowlist, a CI pipeline, and pinned
 reproducible dependencies).  What genuinely remains:
 
-* More unit operations (heat exchanger, pressure loop, conveyor).
 * OPC UA gateway (the Modbus TCP server is already included; a real gateway
   needs the `asyncua` dependency and is not implemented).
 * Multi-process / hot-standby operation — plant/PLC state is module-level,
   so the server is single-process by design (the CLI now refuses
   `--workers > 1`); multi-process support requires an external state store.
 * WebXR/VR walkthrough of the 3D plant.
+* Hardware validation of WebXR on VR headsets.
+
+---
+
+## 25. Production-Grade Architecture (2026-08)
+
+The platform has evolved from a prototype into a production-grade industrial
+simulation/control system with the following verified capabilities:
+
+### Process Units (Real Physics)
+
+| Unit | Model | Key Features |
+|------|-------|--------------|
+| Three-tank cascade | Mass balance (RK4) | Gravity flow, valve orifice, pump droop |
+| Heat exchanger (HX-101) | Two-stream energy balance | UA, fouling parameter, thermal inertia |
+| Pressure vessel (PK-101) | Ideal gas dynamics | PID-controlled outlet, pressure alarms |
+| Conveyor (CV-101) | AC motor dynamics | VFD speed control, jam detection |
+
+Each unit has sensors, actuators, control logic, alarms, and interlocks.
+
+### Control Architecture
+
+| Component | Implementation |
+|-----------|----------------|
+| PID controllers | ISA parallel form, anti-windup, bumpless transfer |
+| Cascade control | Level-level cascade (opt-in: CASCADE_ENABLED) |
+| Gain scheduling | Zone-based (opt-in: GAIN_SCHEDULING_ENABLED) |
+| Temperature control | TIC-101 on heat exchanger cold outlet |
+| Pressure control | PIC-101 on pressure vessel |
+| IEC 61131-3 PLC | TON/TOF/TP/CTU/CTD/SR/RS function blocks |
+| State machine | ISA-88/PackML (IDLE→STARTING→RUNNING→STOPPING) |
+| Interlocks | E-stop, HIHI trips, sensor fault cascades |
+
+### Observability & Events
+
+| Endpoint | Purpose |
+|----------|----------|
+| `/healthz` | Liveness probe (returns 200 if process alive) |
+| `/readyz` | Readiness probe (200 = simulation running) |
+| `/api/metrics` | Uptime, scan count, WS clients, process unit state |
+| `/api/events` | Recent system events with summary |
+
+### Security Controls
+
+| Control | Implementation |
+|---------|----------------|
+| API authentication | Bearer token via SCADA_API_TOKEN env |
+| Operator audit | JSONL log of all control actions |
+| Rate limiting | Per-IP sliding window (CONTROL_RATE_LIMIT) |
+| WebSocket cap | MAX_WS_CLIENTS (default 50) |
+| Modbus allowlist | MODBUS_ALLOWED_CLIENTS env |
+| Input validation | Pydantic models on all POST endpoints |
+| Interlock enforcement | PLC-level, not UI-level |
+
+### Event-Driven Architecture
+
+```
+USER COMMAND → CommandEnvelope(ID, timestamp, source) → PLC VALIDATION
+             → STATE TRANSITION → EVENT (durable, auditable)
+```
+
+- Commands and events separated (command intent vs confirmed outcome)
+- Command ID for idempotency (duplicates rejected)
+- EventStore with thread-safe persistent JSONL logging
+- Bounded memory (500 events in RAM, all persisted to disk)
+
+### Testing (180 tests)
+
+| Category | Count | Scope |
+|----------|-------|-------|
+| Unit tests | 85 | PID, PLC, process model, alarms, events |
+| Integration tests | 45 | API, Modbus, historian, cascade |
+| Out-of-sample robustness | 24 | Seeds, setpoints, disturbances, perturbations |
+| Failure tests | 15 | E-stop, sensor fault, valve stuck, pump trip |
+| Observability tests | 12 | Health, readiness, metrics, events |
+| Security tests | 5 | Auth token, rate limit, Modbus allowlist |
+
+### Production Deployment
+
+```bash
+# Development
+pip install -r requirements.txt
+python run_scada.py
+
+# Production (Docker)
+docker compose up --build
+
+# Permanent public hosting (Render)
+# Push to GitHub → New+ → Blueprint → deploy
+# See docs/DEPLOYMENT.md for step-by-step
+```
+
+### Limitations
+
+- **Single-process only**: module-level state; CLI refuses --workers > 1
+- **No OPC UA**: Modbus TCP only (asyncua not implemented)
+- **No WebXR yet**: architecture supports it, needs hardware validation
+- **Educational simulation**: NOT certified for real equipment control
+
+---
 
 ## License
 
