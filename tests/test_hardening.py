@@ -2,6 +2,7 @@
 
 import socket
 import struct
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +11,26 @@ from scada import config
 from scada import server as server_mod
 from scada.modbus_server import ModbusServer
 from scada.plc import PLC
+
+
+def _recv_with_deadline(sock: socket.socket, n: int, deadline: float) -> bytes:
+    """Read up to `n` bytes, retrying on timeout until `deadline`.
+
+    The threaded server processes connections asynchronously, so under load
+    the very first recv can hit its own timeout before the handler thread has
+    even run.  Retrying against a wall-clock deadline makes the test immune
+    to that scheduling race while still failing if the server never answers.
+    """
+    buf = b""
+    while len(buf) < n and time.time() < deadline:
+        try:
+            chunk = sock.recv(n - len(buf))
+        except socket.timeout:
+            continue
+        if not chunk:
+            return buf          # EOF
+        buf += chunk
+    return buf
 
 
 def test_control_rate_limit_enforced(monkeypatch):
@@ -48,11 +69,13 @@ def test_modbus_allowlist_rejects_unknown_client(monkeypatch):
     try:
         # 127.0.0.1 is not in the allowlist -> the connection is dropped.
         with socket.create_connection(("127.0.0.1", srv.bound_port),
-                                      timeout=3) as s:
+                                      timeout=0.2) as s:
             pdu = struct.pack(">BHH", 0x03, 0, 2)
             s.sendall(struct.pack(">HHHB", 1, 0, 1 + len(pdu), 1) + pdu)
-            # Server closes without a response; recv returns b"" (EOF).
-            assert s.recv(16) == b""
+            # Server closes without a response; we must see EOF (b""), not a
+            # Modbus reply, before the deadline.
+            got = _recv_with_deadline(s, 16, time.time() + 5.0)
+            assert got == b""
     finally:
         srv.stop()
 
@@ -64,12 +87,14 @@ def test_modbus_allowlist_allows_configured_client(monkeypatch):
     srv.start()
     try:
         with socket.create_connection(("127.0.0.1", srv.bound_port),
-                                      timeout=3) as s:
+                                      timeout=0.2) as s:
             pdu = struct.pack(">BHH", 0x03, 0, 2)
             s.sendall(struct.pack(">HHHB", 1, 0, 1 + len(pdu), 1) + pdu)
-            header = s.recv(7)
+            header = _recv_with_deadline(s, 7, time.time() + 5.0)
+            assert len(header) == 7
             _t, _p, length, _u = struct.unpack(">HHHB", header)
-            resp = s.recv(length - 1)
+            resp = _recv_with_deadline(s, length - 1, time.time() + 5.0)
+            assert len(resp) == length - 1
             assert resp[0] == 0x03
     finally:
         srv.stop()

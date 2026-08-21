@@ -44,15 +44,31 @@ def test_lease_renew_fencing(tmp_path):
     assert lease.is_leader("bogus-token") is False
 
 
+def _force_expire(path, name="plant"):
+    """Deterministically make the current lease expire (simulates the active
+    process crashing without relying on wall-clock sleeps, which flake under
+    full-suite load)."""
+    import sqlite3
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute("UPDATE lease SET expires_at = 0.0 WHERE name = ?",
+                     (name,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def test_lease_expiry_allows_takeover(tmp_path):
     """After the TTL passes (active crashed), a standby can take over."""
     path = tmp_path / "ha.sqlite3"
     active = LeaderLease(path)
     standby = LeaderLease(path)
-    ta = active.acquire(ttl=0.05)
+    ta = active.acquire(ttl=5.0)
     assert ta is not None
     assert standby.acquire(ttl=5.0) is None     # still alive
-    time.sleep(0.12)                            # let the lease expire
+    assert not standby.expired()
+    # Crash the active: force the lease past its TTL.
+    _force_expire(path)
     assert standby.expired()
     ts = standby.acquire(ttl=5.0)
     assert ts is not None
@@ -67,8 +83,8 @@ def test_simultaneous_takeover_only_one_wins(tmp_path):
     path = tmp_path / "ha.sqlite3"
     l1 = LeaderLease(path)
     l2 = LeaderLease(path)
-    l1.acquire(ttl=0.05)
-    time.sleep(0.12)
+    l1.acquire(ttl=5.0)
+    _force_expire(path)
     t1 = l1.acquire(ttl=5.0)
     t2 = l2.acquire(ttl=5.0)
     winners = [t for t in (t1, t2) if t is not None]

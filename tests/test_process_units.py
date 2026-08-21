@@ -31,14 +31,20 @@ class TestHeatExchanger:
         assert hx_foul.cold_out < hx_clean.cold_out
 
     def test_slower_transfer_when_flows_low(self):
-        """With lower flows, the rate of temperature change should be slower."""
+        """Energy per unit mass: at steady state, a lower cold-side flow gives
+        a HIGHER cold outlet (the same heat is spread over less mass), while
+        a lower hot-side flow cools the hot stream further."""
         hx_high = HeatExchanger(flow_hot=0.002, flow_cold=0.001)
         hx_low = HeatExchanger(flow_hot=0.0005, flow_cold=0.0002)
-        for _ in range(100):
+        for _ in range(200000):      # settle to steady state
             hx_high.step(0.1)
             hx_low.step(0.1)
-        # Low-flow unit should have smaller temperature change (less energy input).
-        assert abs(hx_low.cold_out - 298.0) < abs(hx_high.cold_out - 298.0)
+        # Low-flow unit: the same UA·LMTD heat over less mass -> hotter outlet.
+        assert hx_low.cold_out > hx_high.cold_out
+        # Second law still holds in both.
+        for hx in (hx_high, hx_low):
+            assert hx.T_cold_in < hx._T_cold < hx.T_hot_in
+            assert hx.T_cold_in < hx._T_hot < hx.T_hot_in
 
     def test_read_snapshot_keys(self):
         hx = HeatExchanger()

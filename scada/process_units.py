@@ -77,6 +77,13 @@ class HeatExchanger:
     UA: float = 2500.0           # W/K  (overall heat transfer coefficient × area)
     fouling: float = 0.0         # 0..1, 0 = clean, 1 = fully fouled (no heat transfer)
 
+    # Fluid density (kg/m^3): the energy balance needs *mass* flow; the
+    # runtime supplies *volume* flow, so ρ converts between them.  Without it
+    # the convective time constant is off by ~ρ/1 (~1000× for water), which
+    # makes the unit appear ~20,000 s instead of ~20 s.
+    density_hot: float = 1000.0
+    density_cold: float = 1000.0
+
     # Hot side (shell)
     mass_hot: float = 20.0       # kg   (fluid inventory in the shell)
     cp_hot: float = 4180.0       # J/(kg·K)  (water)
@@ -99,32 +106,46 @@ class HeatExchanger:
         """UA reduced by fouling factor."""
         return self.UA * (1.0 - self.fouling)
 
+    def _lmtd(self) -> float:
+        """True log-mean temperature difference (counter-flow).
+
+        LMTD = (ΔT1 − ΔT2) / ln(ΔT1/ΔT2)
+
+        with ΔT1 = T_hot_in − T_cold_out and ΔT2 = T_hot_out − T_cold_in.
+        For a physically valid exchanger both terminal differences are
+        strictly positive (heat only flows hot→cold); the max(ε, ·) guard is
+        a numerical floor, not a licence to cross the streams — a crossed
+        state would mean the model is trying to heat the hot side with the
+        cold side, which is impossible."""
+        dt1 = max(self.T_hot_in - self._T_cold, 1e-6)
+        dt2 = max(self._T_hot - self.T_cold_in, 1e-6)
+        if abs(dt1 - dt2) < 1e-9:
+            return dt1
+        return (dt1 - dt2) / math.log(dt1 / dt2)
+
     def step(self, dt: float) -> None:
         """Advance the heat exchanger by `dt` seconds (Euler integration).
 
-        The time constants are ~10 s for the tube side and ~20 s for the
-        shell side — small compared to the tank dynamics — so a simple Euler
-        step at the PLC scan rate is stable and accurate enough.
-        """
+        Energy balances in *mass* flow:
+
+            dTh/dt = (ṁh·cp·(Th_in − Th_out) − UA·LMTD) / (m_hot·cp)
+            dTc/dt = (ṁc·cp·(Tc_in − Tc_out) + UA·LMTD) / (m_cold·cp)
+
+        with ṁ = ρ·Q.  The time constants are ~10 s (tube) and ~20 s
+        (shell) — small compared to the tank dynamics — so a simple Euler
+        step at the PLC scan rate is stable and accurate enough."""
         ua = self.effective_ua()
-
-        # Approximate LMTD (arithmetic mean for ODE simplicity).
-        lmtd = ((self.T_hot_in - self._T_cold)
-                + (self._T_hot - self.T_cold_in)) / 2.0
-
-        # Prevent negative LMTD when streams are nearly equal or crossed.
-        if lmtd < 0.0:
-            lmtd = 0.0
-
+        lmtd = self._lmtd()
         heat_transfer = ua * lmtd  # W (positive = hot→cold)
 
-        # Hot-side energy balance.
-        dTh = (self.flow_hot * self.cp_hot * (self.T_hot_in - self._T_hot)
+        m_hot = self.flow_hot * self.density_hot   # kg/s
+        m_cold = self.flow_cold * self.density_cold
+
+        dTh = (m_hot * self.cp_hot * (self.T_hot_in - self._T_hot)
                - heat_transfer) / (self.mass_hot * self.cp_hot)
         self._T_hot += dTh * dt
 
-        # Cold-side energy balance.
-        dTc = (self.flow_cold * self.cp_cold * (self._T_cold - self.T_cold_in)
+        dTc = (m_cold * self.cp_cold * (self.T_cold_in - self._T_cold)
                + heat_transfer) / (self.mass_cold * self.cp_cold)
         self._T_cold += dTc * dt
 
@@ -150,9 +171,7 @@ class HeatExchanger:
             "T_cold_out": round(self._T_cold, 2),
             "flow_hot": self.flow_hot,
             "flow_cold": self.flow_cold,
-            "heat_transfer_W": round(self.effective_ua() * max(0.0, (
-                (self.T_hot_in - self._T_cold) + (self._T_hot - self.T_cold_in)
-            ) / 2.0), 1),
+            "heat_transfer_W": round(self.effective_ua() * self._lmtd(), 1),
             "fouling": self.fouling,
             "UA_effective": round(self.effective_ua(), 1),
         }
