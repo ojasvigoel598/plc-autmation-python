@@ -443,6 +443,32 @@ command rejection, recovery). It was executed **10 consecutive times with
 zero failures** — including a hard server restart midway — as the review
 acceptance gate.
 
+### Out-of-sample validation & live tracking
+
+A backtest that only exercises the tuned operating point risks overfitting:
+the in-sample suite uses one fixed noise seed, one setpoint step and one
+disturbance size, so a controller could look excellent there and fail
+elsewhere.  To guard against that, `tests/test_robustness.py` is the
+**out-of-sample backtest**: it perturbs the noise seed, sweeps TK-102
+setpoints across the reachable region (0.4–1.2 m), scales disturbances up
+to 4× the nominal, perturbs valve conductance and tank area by ±30 %, runs
+12 randomized combined-perturbation trials, and asserts an honest settled-
+error envelope (< 0.05 m).  It also pins the documented **reachability
+limit**: with LIC-101 holding TK-101 at 1.0 m, TK-102 setpoints above
+~1.2 m are physically unreachable (insufficient gravity head), so the
+controller saturates cleanly there instead of hunting — the "zero
+steady-state error" claim holds only inside that region.
+
+`live_check.py` is the **tracked live side** of the loop: it drives the
+same scenario (0.8→1.0 m setpoint step, 8 L/s disturbance) against a
+running server over the REST API, measures the actual settled error, and
+compares it with the backtested envelope, appending one JSON line per run
+to `data/live_check_history.jsonl`.  Run it on a schedule (cron / Task
+Scheduler) and watch the history for signs of edge decay — e.g. a reservoir
+that has drained under the finite-reservoir model, or a plant that has
+drifted from the tuned model.  A live run should pass with settled errors
+comfortably below 0.05 m.
+
 ## 12. Engineering limitations (simulated vs. real hardware)
 
 This is an educational simulation, **not** a certified PLC or plant model.
