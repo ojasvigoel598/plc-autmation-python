@@ -68,3 +68,13 @@ Features: derivative on measurement, anti-windup, bumpless transfer, output limi
 Injectable: pump trip, stuck valve, sensor failure, blocked outlet, tank leak, pipe leak.
 
 The PLC detects these and latches alarms until operator reset.
+
+## Operating the Simulation
+
+1. Press **START** → plant goes RUNNING
+2. Change a **setpoint** → PID tracks it
+3. Move **XV-102/XV-103** or inject disturbance
+4. Toggle a loop to **MANUAL** → drive the actuator directly
+5. Switch back to **AUTO** → bumpless transfer
+6. Inject a **fault** → observe alarm, interlock, safe state
+7. Press **RESET** → clear fault
