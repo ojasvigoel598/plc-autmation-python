@@ -1,0 +1,5 @@
+# Optional OPC UA gateway dependency.
+# Install with:  pip install -r requirements-opcua.txt
+# The gateway (scada/opcua_gateway.py) activates only when asyncua is
+# present AND OPCUA_ENABLED=1; without it the rest of the stack is unchanged.
+asyncua==2.0.1

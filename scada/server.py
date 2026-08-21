@@ -36,6 +36,7 @@ from . import config
 from .ha import HAState
 from .historian import TrendStore
 from .modbus_server import ModbusServer
+from .opcua_gateway import OpcUaGateway, create_gateway
 from .runtime import Runtime
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -140,6 +141,7 @@ client_tasks: dict[WebSocket, asyncio.Task] = {}
 MAX_QUEUE = 128
 loop_task: asyncio.Task | None = None
 modbus_server: ModbusServer | None = None
+opcua_gateway: OpcUaGateway | None = None
 trend_store: TrendStore | None = None
 
 
@@ -341,7 +343,8 @@ async def _standby_watcher() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global loop_task, modbus_server, trend_store, ha_state, ha_token, ha_role
+    global loop_task, modbus_server, opcua_gateway, trend_store, ha_state, \
+        ha_token, ha_role
     trend_store = TrendStore()
     runtime.historian = trend_store
     # Durable alarm journal: every RAISE/ACK/CLEAR transition is persisted.
@@ -389,9 +392,21 @@ async def lifespan(app: FastAPI):
             # browser HMI still works, only the field interface is absent.
             logger.warning("Modbus TCP server failed to bind: %s", exc)
             modbus_server = None
+
+    if config.OPCUA_ENABLED:
+        opcua_gateway = create_gateway(lambda: runtime, lock=runtime.field_lock)
+        try:
+            if not opcua_gateway.start():
+                opcua_gateway = None
+        except OSError as exc:
+            logger.warning("OPC UA gateway failed to bind: %s", exc)
+            opcua_gateway = None
     try:
         yield
     finally:
+        if opcua_gateway is not None:
+            opcua_gateway.stop()
+            opcua_gateway = None
         if modbus_server is not None:
             modbus_server.stop()
             modbus_server = None

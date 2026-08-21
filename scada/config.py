@@ -301,6 +301,18 @@ HA_CHECKPOINT_SCANS = int(os.environ.get("SCADA_HA_CHECKPOINT_SCANS", "50"))
 # How often (seconds) a STANDBY polls the lease and refreshes its read model.
 HA_POLL_DT = float(os.environ.get("SCADA_HA_POLL_DT", "1.0"))
 
+
+# ---------------------------------------------------------------------------
+# OPC UA gateway (optional; requires the `asyncua` package)
+# ---------------------------------------------------------------------------
+# The gateway mirrors the authoritative runtime state as OPC UA nodes and
+# accepts validated operator commands.  Off by default to keep the project
+# dependency-light; set OPCUA_ENABLED=1 (and `pip install asyncua`) to
+# enable it alongside Modbus.
+OPCUA_ENABLED = os.environ.get("OPCUA_ENABLED", "").lower() in ("1", "true", "yes")
+OPCUA_HOST = os.environ.get("OPCUA_HOST", "0.0.0.0")
+OPCUA_PORT = int(os.environ.get("OPCUA_PORT", "4840"))
+
 # Retention cap: keep at most this many trend samples (pruned by insertion
 # order); alarm events are small and kept separately, so they are not capped.
 HISTORIAN_MAX_ROWS = 2_000_000
