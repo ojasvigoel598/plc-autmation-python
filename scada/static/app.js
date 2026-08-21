@@ -206,11 +206,14 @@ function renderSchematic(s) {
   renderLic("LIC-101", "lic101", s);
   renderLic("LIC-102", "lic102", s);
 
-  // alarm dots
+  // alarm dots (SVG: setAttribute, not className — read-only on SVGElement)
   const alarmTags = new Set((s.alarms || []).map((a) => a.tag));
-  $("dot-101").className = "alarm-dot" + (alarmTags.has("LSHH-101") ? " hihi" : alarmTags.has("LSH-101") ? " hi" : "");
-  $("dot-102").className = "alarm-dot" + (alarmTags.has("LSHH-102") ? " hihi" : alarmTags.has("LSH-102") ? " hi" : "");
-  $("dot-103").className = "alarm-dot" + (alarmTags.has("LSHH-103") ? " hihi" : alarmTags.has("LSH-103") ? " hi" : "");
+  const setAlarmDot = (id, hiTag, hihiTag) => {
+    $(id).setAttribute("class", "alarm-dot" + (alarmTags.has(hihiTag) ? " hihi" : alarmTags.has(hiTag) ? " hi" : ""));
+  };
+  setAlarmDot("dot-101", "LSH-101", "LSHH-101");
+  setAlarmDot("dot-102", "LSH-102", "LSHH-102");
+  setAlarmDot("dot-103", "LSH-103", "LSHH-103");
 
   // flow animation on the main transfer line + tank risers
   const flowing = (s.flows["P-101"] || 0) > 0.0005;
