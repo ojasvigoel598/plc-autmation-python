@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import config
+from .ha import HAState
 from .historian import TrendStore
 from .modbus_server import ModbusServer
 from .runtime import Runtime
@@ -112,11 +113,24 @@ class _GuardMiddleware(BaseHTTPMiddleware):
                 if auth != f"Bearer {config.API_TOKEN}":
                     return JSONResponse({"detail": "unauthorized"},
                                         status_code=401)
+            # Fencing: in HA mode only the ACTIVE lease holder may operate
+            # the plant.  A demoted or standby process must refuse.
+            if config.HA_ENABLED and (
+                    ha_role != "ACTIVE"
+                    or ha_state is None or ha_token is None
+                    or not ha_state.is_leader(ha_token)):
+                return JSONResponse(
+                    {"detail": "not the active process; plant is read-only "
+                               "until failover"}, status_code=503)
         return await call_next(request)
 
 
 # Module-level singletons (the server owns one live simulation).
 runtime = Runtime()
+# HA role bookkeeping (module-level so the middleware and endpoints share it).
+ha_state: HAState | None = None
+ha_token: str | None = None
+ha_role: str = "ACTIVE"   # ACTIVE | STANDBY  (HA off => always ACTIVE, unfenced)
 clients: set[WebSocket] = set()
 # Per-client outbound queues decouple the sim loop from slow consumers: a
 # stalled browser must never freeze the plant.
@@ -233,6 +247,7 @@ async def _sim_loop() -> None:
     period = config.PLC_SCAN_DT / max(0.01, config.SIM_SPEED)
     next_tick = time.monotonic()
     trend_counter = 0
+    checkpoint_counter = 0
     while True:
         try:
             snapshot = runtime.step()
@@ -242,6 +257,22 @@ async def _sim_loop() -> None:
             if trend_counter >= 5:
                 trend_counter = 0
                 await _broadcast({"type": "trends", "data": runtime.trends(400)})
+
+            # HA: renew the lease every scan (fencing heartbeat).  If renewal
+            # fails we have lost authority (a standby took over after our
+            # lease expired) — stop simulating immediately rather than fight
+            # the new leader.  Periodically checkpoint full state so a
+            # failover resumes from here instead of from initial conditions.
+            if config.HA_ENABLED and ha_state is not None and ha_token:
+                if not ha_state.renew(ha_token, config.HA_LEASE_TTL):
+                    logger.warning("lease lost; demoting to STANDBY")
+                    _demote_to_standby()
+                    return
+                checkpoint_counter += 1
+                if checkpoint_counter >= config.HA_CHECKPOINT_SCANS:
+                    checkpoint_counter = 0
+                    ha_state.checkpoint(ha_token, snapshot.get("t", 0.0),
+                                        runtime.serialize())
         except Exception:
             # One bad tick must never silently kill the simulation: log and
             # continue on the next schedule slot.
@@ -256,16 +287,96 @@ async def _sim_loop() -> None:
             next_tick = time.monotonic()
 
 
+def _demote_to_standby() -> None:
+    """This process lost the lease: stop owning state, serve read-only from
+    the latest checkpoint and watch for a chance to take over again."""
+    global ha_role
+    ha_role = "STANDBY"
+    # Rebuild the read model from the newest checkpoint immediately so the
+    # HMI/API continue to serve (frozen) state instead of stale local state.
+    if ha_state is not None:
+        ckpt = ha_state.load()
+        if ckpt is not None:
+            try:
+                runtime.restore(ckpt["state"])
+            except Exception:
+                logger.exception("standby: failed to restore checkpoint")
+
+
+async def _standby_watcher() -> None:
+    """STANDBY process: poll the lease; when it expires (the ACTIVE crashed
+    or stalled), take over: acquire the lease, restore the latest checkpoint
+    and start simulating.  The SQLite transaction makes takeover atomic, so
+    two standbys can never both win."""
+    global ha_role, ha_token, loop_task
+    while True:
+        await asyncio.sleep(config.HA_POLL_DT)
+        try:
+            if ha_state is None:
+                return
+            if ha_state.expired():
+                token = ha_state.try_takeover(config.HA_LEASE_TTL)
+                if token is not None:
+                    ha_token = token
+                    ckpt = ha_state.load()
+                    if ckpt is not None:
+                        runtime.restore(ckpt["state"])
+                    ha_role = "ACTIVE"
+                    logger.warning("STANDBY took over the lease; resuming "
+                                   "simulation from checkpoint t=%.1fs",
+                                   ckpt["t"] if ckpt else 0.0)
+                    loop_task = asyncio.create_task(_sim_loop())
+                    return
+            else:
+                # Keep the read model fresh for read-only serving.
+                ckpt = ha_state.load()
+                if ckpt is not None:
+                    try:
+                        runtime.restore(ckpt["state"])
+                    except Exception:
+                        logger.exception("standby: refresh restore failed")
+        except Exception:
+            logger.exception("standby watcher tick failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global loop_task, modbus_server, trend_store
+    global loop_task, modbus_server, trend_store, ha_state, ha_token, ha_role
     trend_store = TrendStore()
     runtime.historian = trend_store
     # Durable alarm journal: every RAISE/ACK/CLEAR transition is persisted.
     runtime.plc.alarms.set_event_callback(
         lambda action, alarm, t: trend_store.record_alarm_event(
             alarm.tag, alarm.message, alarm.priority, action, t))
-    loop_task = asyncio.create_task(_sim_loop())
+
+    # --- High-availability negotiation ---------------------------------
+    # In HA mode every worker competes for the lease; exactly one wins and
+    # runs the simulation, the rest serve the checkpoint read-only.
+    if config.HA_ENABLED:
+        ha_state = HAState(config.HA_DB_FILE)
+        ha_token = ha_state.try_takeover(config.HA_LEASE_TTL)
+        if ha_token is not None:
+            ha_role = "ACTIVE"
+            ckpt = ha_state.load()
+            if ckpt is not None:
+                runtime.restore(ckpt["state"])
+                logger.info("HA ACTIVE: resumed from checkpoint t=%.1fs",
+                            ckpt["t"])
+            else:
+                logger.info("HA ACTIVE: no checkpoint, starting fresh")
+            loop_task = asyncio.create_task(_sim_loop())
+        else:
+            ha_role = "STANDBY"
+            logger.info("HA STANDBY: another process holds the lease; "
+                        "serving checkpoint read-only")
+            ckpt = ha_state.load()
+            if ckpt is not None:
+                runtime.restore(ckpt["state"])
+            loop_task = asyncio.create_task(_standby_watcher())
+    else:
+        ha_role = "ACTIVE"
+        loop_task = asyncio.create_task(_sim_loop())
+
     if config.MODBUS_ENABLED:
         modbus_server = ModbusServer(lambda: runtime.plc,
                                      host=config.MODBUS_HOST,
@@ -284,6 +395,11 @@ async def lifespan(app: FastAPI):
         if modbus_server is not None:
             modbus_server.stop()
             modbus_server = None
+        if config.HA_ENABLED and ha_token and ha_state is not None:
+            # Graceful hand-back so a standby can take over immediately
+            # instead of waiting out the lease.
+            ha_state.release(ha_token)
+            ha_token = None
         runtime.flush_historian()
         runtime.historian = None
         if trend_store is not None:
@@ -531,12 +647,15 @@ def create_app(start_loop: bool = True) -> FastAPI:
 
     @app.get("/readyz")
     async def readyz() -> JSONResponse:
-        """Readiness probe: returns 200 if the simulation is running."""
+        """Readiness probe: returns 200 if this process can serve.  An ACTIVE
+        process is ready when its simulation loop is running; a STANDBY is
+        ready to serve the checkpoint read-only and take over."""
         ready = loop_task is not None and not loop_task.done()
         status = 200 if ready else 503
         return JSONResponse({"status": "ready" if ready else "not ready",
-                            "simulation": runtime.plc.state},
-                           status_code=status)
+                             "simulation": runtime.plc.state,
+                             "ha_role": ha_role},
+                            status_code=status)
 
     @app.get("/api/metrics")
     async def metrics() -> JSONResponse:
@@ -545,6 +664,8 @@ def create_app(start_loop: bool = True) -> FastAPI:
             "uptime_s": round(time.monotonic() - _start_time, 1),
             "scan_count": runtime.plc.scan_count,
             "plc_state": runtime.plc.state,
+            "ha_role": ha_role,
+            "ha_leader": (ha_state.leader() if ha_state is not None else None),
             "ws_clients": len(clients),
             "ws_queue_depths": {id(ws): q.qsize() for ws, q in client_queues.items()},
             "process_units": {

@@ -22,7 +22,7 @@ from collections import deque
 
 from . import config
 from .historian import TrendStore
-from .leakdetect import MassBalanceLeakDetector
+from .leakdetect import MassBalanceLeakDetector, _Balance
 from .leaks import LeakStore
 from .plc import PLC
 from .process import Plant
@@ -399,6 +399,284 @@ class Runtime:
                 "manual_pump": plc.manual_pump,
             },
         }
+
+    # ------------------------------------------------------------------
+    # HA: authoritative-state serialisation (for failover/checkpoints)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _rng_state_to_json(state: dict) -> dict:
+        """Convert a numpy Generator state (may contain ndarrays) to plain
+        JSON-safe types so it round-trips through the checkpoint store."""
+        import numpy as np
+        out = {}
+        for k, v in state.items():
+            if isinstance(v, dict):
+                out[k] = Runtime._rng_state_to_json(v)
+            elif isinstance(v, np.ndarray):
+                out[k] = {"__ndarray__": v.tolist(),
+                          "dtype": str(v.dtype)}
+            else:
+                out[k] = v
+        return out
+
+    @staticmethod
+    def _rng_state_from_json(state: dict) -> dict:
+        """Inverse of ``_rng_state_to_json``: rebuild numpy arrays."""
+        import numpy as np
+        out = {}
+        for k, v in state.items():
+            if isinstance(v, dict) and "__ndarray__" in v:
+                out[k] = np.array(v["__ndarray__"], dtype=v["dtype"])
+            elif isinstance(v, dict):
+                out[k] = Runtime._rng_state_from_json(v)
+            else:
+                out[k] = v
+        return out
+
+    def serialize(self) -> dict:
+        """Capture the complete authoritative state as a JSON-serialisable
+        dict (plant, PLC engine incl. every function block, process units,
+        fault state, disturbance bookkeeping, leak balances, trend tail).
+
+        This is the payload written to the HA checkpoint store; a standby
+        that takes over calls ``restore()`` with it and continues the
+        simulation seamlessly."""
+        plc = self.plc
+        plant = self.plant
+
+        # PID internals (anti-windup integrator, derivative state, mode).
+        pids = {}
+        for tag, pid in plc.pids.items():
+            pids[tag] = {
+                "sp": pid.setpoint, "pv": pid.pv, "mv": pid.mv,
+                "mode": pid.mode, "kp": pid.kp, "ki": pid.ki, "kd": pid.kd,
+                "_integral": pid._integral, "_last_pv": pid._last_pv,
+                "_deriv": pid._deriv, "p_term": pid.p_term,
+                "i_term": pid.i_term, "d_term": pid.d_term,
+                "saturated": pid.saturated, "error": pid.error,
+            }
+
+        alarms = [self.plc._alarm_dict(a) for a in plc.alarms.history]
+        alarm_active = {tag: self.plc._alarm_dict(a)
+                        for tag, a in plc.alarms.active.items()}
+
+        return {
+            "plant": {
+                "t": plant.t,
+                "levels": dict(plant.levels),
+                "reservoir_level": plant.reservoir_level,
+                "overflow_volume": dict(plant.overflow_volume),
+                "leaks": dict(plant.leaks),
+                "valve_leaks": dict(plant.valve_leaks),
+                "valves": {tag: {"open_frac": v.open_frac,
+                                  "target": v.target, "blocked": v.blocked}
+                           for tag, v in plant.valves.items()},
+                "pumps": {tag: {"speed": p.speed, "target": p.target}
+                          for tag, p in plant.pumps.items()},
+                "transmitters": {tag: {"fault": tx.fault,
+                                        "_stuck_value": tx._stuck_value,
+                                        "_drift_value": tx._drift_value}
+                                 for tag, tx in plant.level_tx.items()},
+                "rng": self._rng_state_to_json(plant.rng.bit_generator.state),
+            },
+            "plc": {
+                "state": plc.state, "t": plc.t, "scan_count": plc.scan_count,
+                "first_scan": plc.first_scan,
+                "ai": dict(plc.ai), "i": dict(plc.i),
+                "aq": dict(plc.aq), "q": dict(plc.q), "m": dict(plc.m),
+                "loop_mode": dict(plc.loop_mode),
+                "loop_manual_mv": dict(plc.loop_manual_mv),
+                "manual_valves": dict(plc.manual_valves),
+                "manual_pump": plc.manual_pump,
+                "cascade_inner_sp": plc.cascade_inner_sp,
+                "pids": pids,
+                "alarms_active": alarm_active,
+                "alarms_history": alarms,
+                "fbs": {
+                    "start_timer": [plc._start_timer.et, plc._start_timer.q],
+                    "stop_timer": [plc._stop_timer.et, plc._stop_timer.q],
+                    "pump_trip_timer": [plc._pump_trip_timer.et,
+                                         plc._pump_trip_timer.q],
+                    "valve_fault_timer": [plc._valve_fault_timer.et,
+                                           plc._valve_fault_timer.q],
+                    "pump_cycle_ctr": [plc._pump_cycle_ctr.cv,
+                                        plc._pump_cycle_ctr._in_prev],
+                    "trip_latch": plc._trip_latch.q,
+                    "valve_fault_latch": plc._valve_fault_latch.q,
+                    "sensor_fault_latches": {
+                        tag: latch.q
+                        for tag, latch in plc._sensor_fault_latch.items()},
+                    "trig_start": plc._trig_start._prev,
+                    "trig_stop": plc._trig_stop._prev,
+                    "trig_reset": plc._trig_reset._prev,
+                    "last_level": dict(plc._last_level),
+                },
+            },
+            "units": {
+                "hx": {"_T_hot": self.units.hx._T_hot,
+                        "_T_cold": self.units.hx._T_cold,
+                        "fouling": self.units.hx.fouling,
+                        "flow_hot": self.units.hx.flow_hot,
+                        "flow_cold": self.units.hx.flow_cold},
+                "pressure": {"_P": self.units.pressure._P,
+                              "valve_position": self.units.pressure.valve_position},
+                "conveyor": {"speed": self.units.conveyor.speed,
+                              "target_speed": self.units.conveyor.target_speed,
+                              "running": self.units.conveyor.running,
+                              "jammed": self.units.conveyor.jammed,
+                              "motor_fault": self.units.conveyor.motor_fault,
+                              "products_on_belt": self.units.conveyor.products_on_belt,
+                              "runtime_accum": self.units.conveyor.runtime_accum,
+                              "jam_timer": self.units.conveyor.jam_timer},
+            },
+            "runtime": {
+                "pump_tripped": self.pump_tripped,
+                "valve_stuck": dict(self.valve_stuck),
+                "valve_stuck_pos": dict(self.valve_stuck_pos),
+                "leaks": dict(self.leaks),
+                "valve_leaks": dict(self.valve_leaks),
+                "_disturbance_until": self._disturbance_until,
+                "_disturbance_tank": self._disturbance_tank,
+                "_disturbance_flow": self._disturbance_flow,
+                "_active_leaks": dict(self._active_leaks),
+                "_last_leak_rate": dict(self._last_leak_rate),
+                "leak_balances": {
+                    tag: {"explained": b.explained, "observed": b.observed,
+                          "prev_level": b.prev_level,
+                          "prev_overflow": b.prev_overflow,
+                          "window_start": b.window_start,
+                          "last_rate": b.last_rate}
+                    for tag, b in self.leak_detector._bal.items()},
+                "history": list(self.history),
+            },
+        }
+
+    def restore(self, state: dict) -> None:
+        """Replace this runtime's authoritative state with a previously
+        captured ``serialize()`` payload (used on HA takeover).  The
+        historian/leak-store objects are *not* part of the payload and are
+        left untouched, so durable stores keep their own identity."""
+        from .plc import Alarm
+
+        plc = self.plc
+        plant = self.plant
+        s = state["plant"]
+
+        plant.t = s["t"]
+        plant.levels.update(s["levels"])
+        plant.reservoir_level = s["reservoir_level"]
+        plant.overflow_volume.update(s["overflow_volume"])
+        plant.leaks.update(s["leaks"])
+        plant.valve_leaks.update(s["valve_leaks"])
+        for tag, v in s["valves"].items():
+            plant.valves[tag].open_frac = v["open_frac"]
+            plant.valves[tag].target = v["target"]
+            plant.valves[tag].blocked = v["blocked"]
+        for tag, p in s["pumps"].items():
+            plant.pumps[tag].speed = p["speed"]
+            plant.pumps[tag].target = p["target"]
+        for tag, tx in s["transmitters"].items():
+            plant.level_tx[tag].fault = tx["fault"]
+            plant.level_tx[tag]._stuck_value = tx["_stuck_value"]
+            plant.level_tx[tag]._drift_value = tx["_drift_value"]
+        plant.rng.bit_generator.state = self._rng_state_from_json(s["rng"])
+
+        p = state["plc"]
+        plc.state = p["state"]
+        plc.t = p["t"]
+        plc.scan_count = p["scan_count"]
+        plc.first_scan = p["first_scan"]
+        plc.ai.update(p["ai"])
+        plc.i.update(p["i"])
+        plc.aq.update(p["aq"])
+        plc.q.update(p["q"])
+        plc.m.update(p["m"])
+        plc.loop_mode.update(p["loop_mode"])
+        plc.loop_manual_mv.update(p["loop_manual_mv"])
+        plc.manual_valves.update(p["manual_valves"])
+        plc.manual_pump = p["manual_pump"]
+        plc.cascade_inner_sp = p["cascade_inner_sp"]
+        for tag, pid in p["pids"].items():
+            c = plc.pids[tag]
+            c.setpoint = pid["sp"]
+            c.pv = pid["pv"]
+            c.mv = pid["mv"]
+            c.mode = pid["mode"]
+            c.kp, c.ki, c.kd = pid["kp"], pid["ki"], pid["kd"]
+            c._integral = pid["_integral"]
+            c._last_pv = pid["_last_pv"]
+            c._deriv = pid["_deriv"]
+            c.p_term = pid["p_term"]
+            c.i_term = pid["i_term"]
+            c.d_term = pid["d_term"]
+            c.saturated = pid["saturated"]
+            c.error = pid["error"]
+
+        # Rebuild the alarm manager state (active set + history).
+        def _mk(d: dict) -> Alarm:
+            return Alarm(tag=d["tag"], message=d["message"],
+                         priority=d["priority"], active=d.get("active", True),
+                         acked=d.get("acked", False), t_raise=d["t_raise"],
+                         t_ack=d.get("t_ack"), t_clear=d.get("t_clear"))
+        plc.alarms.active = {tag: _mk(d) for tag, d in p["alarms_active"].items()}
+        plc.alarms.history = [_mk(d) for d in p["alarms_history"]]
+
+        fb = p["fbs"]
+        plc._start_timer.et, plc._start_timer.q = fb["start_timer"]
+        plc._stop_timer.et, plc._stop_timer.q = fb["stop_timer"]
+        plc._pump_trip_timer.et, plc._pump_trip_timer.q = fb["pump_trip_timer"]
+        plc._valve_fault_timer.et, plc._valve_fault_timer.q = fb["valve_fault_timer"]
+        plc._pump_cycle_ctr.cv, plc._pump_cycle_ctr._in_prev = fb["pump_cycle_ctr"]
+        plc._trip_latch.q = fb["trip_latch"]
+        plc._valve_fault_latch.q = fb["valve_fault_latch"]
+        for tag, q in fb["sensor_fault_latches"].items():
+            plc._sensor_fault_latch[tag].q = q
+        plc._trig_start._prev = fb["trig_start"]
+        plc._trig_stop._prev = fb["trig_stop"]
+        plc._trig_reset._prev = fb["trig_reset"]
+        plc._last_level.update(fb["last_level"])
+
+        u = state["units"]
+        self.units.hx._T_hot = u["hx"]["_T_hot"]
+        self.units.hx._T_cold = u["hx"]["_T_cold"]
+        self.units.hx.fouling = u["hx"]["fouling"]
+        self.units.hx.flow_hot = u["hx"]["flow_hot"]
+        self.units.hx.flow_cold = u["hx"]["flow_cold"]
+        self.units.pressure._P = u["pressure"]["_P"]
+        self.units.pressure.valve_position = u["pressure"]["valve_position"]
+        cv = u["conveyor"]
+        self.units.conveyor.speed = cv["speed"]
+        self.units.conveyor.target_speed = cv["target_speed"]
+        self.units.conveyor.running = cv["running"]
+        self.units.conveyor.jammed = cv["jammed"]
+        self.units.conveyor.motor_fault = cv["motor_fault"]
+        self.units.conveyor.products_on_belt = cv["products_on_belt"]
+        self.units.conveyor.runtime_accum = cv["runtime_accum"]
+        self.units.conveyor.jam_timer = cv["jam_timer"]
+
+        r = state["runtime"]
+        self.pump_tripped = r["pump_tripped"]
+        self.valve_stuck.update(r["valve_stuck"])
+        self.valve_stuck_pos.update(r["valve_stuck_pos"])
+        self.leaks.update(r["leaks"])
+        self.valve_leaks.update(r["valve_leaks"])
+        self._disturbance_until = r["_disturbance_until"]
+        self._disturbance_tank = r["_disturbance_tank"]
+        self._disturbance_flow = r["_disturbance_flow"]
+        self._active_leaks.update(r["_active_leaks"])
+        self._last_leak_rate.update(r["_last_leak_rate"])
+        self.leak_detector._bal = {}
+        for tag, b in r["leak_balances"].items():
+            bal = _Balance()
+            bal.explained = b["explained"]
+            bal.observed = b["observed"]
+            bal.prev_level = b["prev_level"]
+            bal.prev_overflow = b["prev_overflow"]
+            bal.window_start = b["window_start"]
+            bal.last_rate = b["last_rate"]
+            self.leak_detector._bal[tag] = bal
+        self.history.clear()
+        self.history.extend(r["history"])
 
     def plant_config(self) -> dict:
         """Static plant topology + 3D layout, for a config-driven frontend."""

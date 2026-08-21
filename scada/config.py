@@ -271,6 +271,36 @@ LEAK_HISTORY_LIMIT = 30        # latest N events surfaced to the frontend
 # sim loop never blocks on a per-sample disk write.
 HISTORIAN_FLUSH_SCANS = 10
 
+
+# ---------------------------------------------------------------------------
+# High availability (multi-process / active-standby)
+# ---------------------------------------------------------------------------
+# When SCADA_HA=1 the server runs in HA mode: every worker process competes
+# for a lease (held in the shared SQLite HA store) and exactly one becomes
+# ACTIVE (runs the simulation, checkpoints state); the rest are STANDBY
+# (serve the latest checkpoint read-only and take over when the lease
+# expires).  With HA off (the default) the behaviour is unchanged:
+# single-process, no shared state.
+HA_ENABLED = os.environ.get("SCADA_HA", "").lower() in ("1", "true", "yes")
+
+# Shared lease + checkpoint store (SQLite, like the historian).  Must be on a
+# filesystem both workers can reach; with uvicorn --workers N every worker on
+# the same host shares this path.
+HA_DB_FILE = os.environ.get("SCADA_HA_DB", "data/ha.sqlite3")
+
+# Lease lifetime: the ACTIVE process renews on every PLC scan.  A crashed
+# process's lease expires after this long, and a STANDBY then takes over.
+# Keep it a few seconds: long enough to ride out transient stalls, short
+# enough for fast failover.
+HA_LEASE_TTL = float(os.environ.get("SCADA_HA_LEASE_TTL", "5.0"))
+
+# Full-state checkpoint cadence in PLC scans (50 scans == 5 s at 10 Hz).
+# Trade-off: smaller interval = less lost on failover, more disk I/O.
+HA_CHECKPOINT_SCANS = int(os.environ.get("SCADA_HA_CHECKPOINT_SCANS", "50"))
+
+# How often (seconds) a STANDBY polls the lease and refreshes its read model.
+HA_POLL_DT = float(os.environ.get("SCADA_HA_POLL_DT", "1.0"))
+
 # Retention cap: keep at most this many trend samples (pruned by insertion
 # order); alarm events are small and kept separately, so they are not capped.
 HISTORIAN_MAX_ROWS = 2_000_000

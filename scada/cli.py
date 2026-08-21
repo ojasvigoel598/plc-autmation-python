@@ -36,9 +36,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-modbus", action="store_true",
                         help="disable the Modbus TCP field interface")
     parser.add_argument("--workers", type=int, default=1,
-                        help="uvicorn worker count.  Only 1 is supported: "
-                             "the simulation owns module-level state, so "
-                             "multiple workers would fork separate plants.")
+                        help="uvicorn worker count.  With --ha (or "
+                             "SCADA_HA=1) multiple workers are supported: "
+                             "exactly one acquires the HA lease and runs the "
+                             "simulation, the rest serve the checkpoint "
+                             "read-only and fail over when the lease expires. "
+                             "Without HA, only 1 worker is safe (the "
+                             "simulation owns in-process state, so multiple "
+                             "workers would fork separate plants).")
+    parser.add_argument("--ha", action="store_true",
+                        help="enable high-availability mode (equivalent to "
+                             "SCADA_HA=1): multi-process active/standby with "
+                             "lease fencing and state checkpoints")
+    parser.add_argument("--ha-db", default=None,
+                        help="path to the shared HA lease/checkpoint store "
+                             "(default data/ha.sqlite3)")
     return parser
 
 
@@ -53,11 +65,17 @@ def main(argv: list[str] | None = None) -> None:
         config.MODBUS_PORT = max(1, args.modbus_port)
     if args.no_modbus:
         config.MODBUS_ENABLED = False
+    if args.ha:
+        config.HA_ENABLED = True
+    if args.ha_db is not None:
+        config.HA_DB_FILE = args.ha_db
 
-    if args.workers != 1:
+    if args.workers != 1 and not config.HA_ENABLED:
         raise SystemExit(
-            "error: the SCADA simulation is single-process by design "
-            "(plant/PLC state is module-level); --workers must be 1")
+            "error: multiple workers require high-availability mode.  "
+            "Run with --ha (or set SCADA_HA=1) so the workers share a lease "
+            "and exactly one owns the simulation; otherwise each worker "
+            "would fork a separate plant.")
 
     uvicorn.run("scada.server:app", host=args.host, port=args.port,
                 log_level="info", workers=args.workers)
