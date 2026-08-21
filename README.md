@@ -18,3 +18,18 @@ I started this as a matplotlib demo. It's now a multi-tank plant with:
 - E-stop, interlocks, and alarm handling
 - A live 3D digital twin (React + Three.js)
 - A 2D P&ID HMI (legacy, kept)
+
+## Quick Start
+
+```bash
+pip install -r requirements.txt
+python run_scada.py
+```
+
+- 3D digital twin: http://127.0.0.1:8000/app
+- 2D P&ID HMI: http://127.0.0.1:8000/
+
+For Docker:
+```bash
+docker compose up --build
+```
