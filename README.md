@@ -105,3 +105,15 @@ React + Three.js 3D twin → WebSocket → FastAPI backend
 - `docs/COMPARATIVE_ANALYSIS.md` vs OpenPLC, Beremiz, commercial tools
 - `docs/DEPLOYMENT.md` — Render deployment, security
 - `docs/TECHNICAL_DETAILS.md` — physics models, validation, limitations
+
+## Limitations
+
+- Single-process only (module-level state)
+- Educational simulation, not certified for real equipment
+- Fluids are ideal (no water hammer, no viscosity effects)
+- Leaks only at tanks (not pipes/pumps/valves)
+- No CIP/cleaning model, no product identity tracking
+
+## License
+
+MIT
