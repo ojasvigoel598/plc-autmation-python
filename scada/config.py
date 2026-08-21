@@ -22,7 +22,13 @@ Reference concepts:
   * ISA-5.1   instrumentation symbology and tag naming
   * IEC 61131-3 function blocks (TON/TOF/CTU/SR/RS ...)
   * ISA-88 / PackML operating state machine (influence from PLC2Skill)
+
+Environment variables are read at import time (PORT for the listen port,
+SCADA_API_TOKEN / SCADA_AUDIT_LOG for the security layer, SCADA_LEAK_STORE /
+SCADA_TREND_STORE to relocate persisted data).
 """
+
+import os
 
 # ---------------------------------------------------------------------------
 # Gravity
@@ -164,6 +170,18 @@ MODBUS_PORT = 502
 # faster than the measured flow balance can explain, sustained over a window.
 LEAK_STORE_FILE = "data/leaks.json"   # relative to the repository root
 TREND_STORE_FILE = "data/trends.sqlite3"  # SQLite historian (relative to root)
+
+# ---------------------------------------------------------------------------
+# Security: API token and operator audit log
+# ---------------------------------------------------------------------------
+# Set SCADA_API_TOKEN to protect every control/fault POST with a Bearer
+# token.  Empty (the default) keeps the open demo behaviour.  Read-only
+# telemetry (/api/state, /ws) is always public.
+API_TOKEN = os.environ.get("SCADA_API_TOKEN", "")
+
+# Every operator action is appended to this JSONL audit log (one JSON object
+# per line: timestamp, endpoint, client IP, request body).
+AUDIT_LOG_FILE = "data/audit.jsonl"  # relative to the repository root
 LEAK_DETECT_WINDOW = 8.0      # s : integration window for the balance check
 LEAK_DETECT_MIN_RATE = 0.0003  # m^3/s (0.3 L/s) : smallest reportable leak
                                # (a rate sustained over the window implies the

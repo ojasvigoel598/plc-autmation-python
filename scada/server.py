@@ -15,16 +15,20 @@ system into an impossible state.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import config
 from .historian import TrendStore
@@ -35,6 +39,57 @@ STATIC_DIR = Path(__file__).parent / "static"
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 logger = logging.getLogger("scada.server")
+
+_audit_lock = threading.Lock()
+
+
+def _audit_path() -> Path:
+    """Operator-action audit log path (overridable for tests)."""
+    env = os.environ.get("SCADA_AUDIT_LOG")
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parent.parent / config.AUDIT_LOG_FILE
+
+
+def _write_audit(entry: dict) -> None:
+    """Append one JSON line to the audit log (best-effort, never breaks
+    control even if the log cannot be written)."""
+    try:
+        path = _audit_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _audit_lock:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry) + "\n")
+    except OSError:
+        pass
+
+
+class _GuardMiddleware(BaseHTTPMiddleware):
+    """Protect and audit every operator action (POST /api/control/* and
+    /api/faults/*).  When ``config.API_TOKEN`` is set, requests must carry
+    ``Authorization: Bearer <token>``; the default (no token) keeps the
+    unauthenticated behaviour for local/demo use."""
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if request.method == "POST" and (
+                path.startswith("/api/control/") or path.startswith("/api/faults/")):
+            body = await request.body()
+            client = request.client.host if request.client else "unknown"
+            _write_audit({
+                "ts": time.time(),
+                "method": request.method,
+                "path": path,
+                "client": client,
+                "body": body.decode("utf-8", "replace"),
+            })
+            if config.API_TOKEN:
+                auth = request.headers.get("authorization", "")
+                if auth != f"Bearer {config.API_TOKEN}":
+                    return JSONResponse({"detail": "unauthorized"},
+                                        status_code=401)
+        return await call_next(request)
+
 
 # Module-level singletons (the server owns one live simulation).
 runtime = Runtime()
@@ -220,6 +275,7 @@ async def lifespan(app: FastAPI):
 def create_app(start_loop: bool = True) -> FastAPI:
     app = FastAPI(title="Multi-Tank PLC/SCADA Simulator", version="1.0.0",
                   lifespan=lifespan if start_loop else None)
+    app.add_middleware(_GuardMiddleware)
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
