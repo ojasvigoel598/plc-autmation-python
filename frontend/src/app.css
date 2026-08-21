@@ -73,6 +73,16 @@ body {
   padding: 7px 14px; border-radius: 6px; font-weight: 700; z-index: 5;
 }
 
+/* WebXR / VR entry button (top-right of the 3D viewport) */
+.vr-btn {
+  position: absolute; top: 10px; right: 12px; z-index: 6;
+  background: #1a2432; color: var(--blue); border: 1px solid #3d5a80;
+  border-radius: 6px; padding: 7px 12px; font-weight: 700; font-size: 12px;
+  cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.5);
+}
+.vr-btn:hover { background: #223048; }
+.vr-btn.on { background: var(--blue); color: #0a0e14; border-color: var(--blue); }
+
 .sidebar {
   display: flex; flex-direction: column; min-height: 0; overflow: hidden;
 }

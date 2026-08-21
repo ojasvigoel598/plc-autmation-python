@@ -4,6 +4,7 @@ import PlantScene from "./PlantScene.jsx";
 import TrendChart from "./TrendChart.jsx";
 import LeakView from "./LeakView.jsx";
 import PlcView from "./PlcView.jsx";
+import { VRButton } from "./WebXR.jsx";
 
 /* Minimal client-side router.  The SPA is mounted at BASE_URL (/app/ in
    production, / in dev); routes are expressed relative to that base. */
@@ -722,6 +723,7 @@ export default function App() {
       <div className="main">
         <div className="viewport">
           {estop && <div className="banner">⚠ EMERGENCY STOP ACTIVE</div>}
+          <VRButton />
           {!config ? (
             <div className="vp-hint">Connecting to simulation…</div>
           ) : (

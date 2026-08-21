@@ -2,6 +2,7 @@ import React, { useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Html, Grid } from "@react-three/drei";
 import * as THREE from "three";
+import { WebXRScene, XROrbitControls } from "./WebXR.jsx";
 
 const WATER = "#1d7fd4";
 const WATER_GLOW = "#3fa9f5";
@@ -416,6 +417,7 @@ export default function PlantScene({ config, state, selected, onSelect }) {
 
   return (
     <Canvas shadows camera={{ position: [4, 8, 20], fov: 45 }} gl={{ antialias: true }}>
+      <WebXRScene>
       <color attach="background" args={["#07090d"]} />
       <fog attach="fog" args={["#07090d", 24, 70]} />
       <ambientLight intensity={0.55} />
@@ -433,7 +435,7 @@ export default function PlantScene({ config, state, selected, onSelect }) {
       />
       {/* cool fill light from the back so the equipment never goes flat black */}
       <directionalLight position={[-10, 8, -14]} intensity={0.35} color="#9fb8d8" />
-      <OrbitControls
+      <XROrbitControls
         target={[3.5, 1.6, 0]}
         maxPolarAngle={Math.PI * 0.49}
         minDistance={4}
@@ -501,6 +503,7 @@ export default function PlantScene({ config, state, selected, onSelect }) {
       {beaconPositions.map((b) => (
         <Beacon key={b.eq} position={b.pos} color={b.color} active />
       ))}
+      </WebXRScene>
     </Canvas>
   );
 }
