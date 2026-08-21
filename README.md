@@ -33,3 +33,38 @@ For Docker:
 ```bash
 docker compose up --build
 ```
+
+## How It Works
+
+### The Plant
+
+```
+[reservoir] --P-101--> TK-101 --XV-101--> TK-102 --XV-102--> TK-103 --XV-103--> drain
+```
+
+- **Valve flow**: sharp-edged orifice equation, `Q = u * Cd * A * sqrt(2g * dh)`
+- **Pump flow**: centrifugal characteristic with droop, `Q = u * Qmax * (1 - droop * head)`
+- **Mass balance**: `A * dh/dt = Q_in - Q_out - Q_leak` (RK4 integration)
+
+### The PLC
+
+The PLC runs a classic scan cycle every 100ms:
+1. Input scan (latch transmitter readings)
+2. Program scan (execute control logic)
+3. Output update (write to actuators)
+
+Implemented IEC 61131-3 blocks: TON, TOF, TP, CTU, CTD, SR, RS, R_TRIG, F_TRIG.
+
+### Control
+
+Two PID loops in ISA parallel form:
+- LIC-101: TK-101 level → P-101 speed
+- LIC-102: TK-102 level → XV-101 opening
+
+Features: derivative on measurement, anti-windup, bumpless transfer, output limits.
+
+### Faults
+
+Injectable: pump trip, stuck valve, sensor failure, blocked outlet, tank leak, pipe leak.
+
+The PLC detects these and latches alarms until operator reset.
