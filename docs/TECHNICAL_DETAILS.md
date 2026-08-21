@@ -82,3 +82,35 @@ The integrator shows genuine 4th-order convergence (error ratios ≈16 per step 
 ### Reservoir Mass Balance
 
 The finite reservoir depletes under pump draw. When empty, the pump starves (zero flow).
+
+## Interlocks and Permissives
+
+- **E-stop**: highest authority, pump stopped, all valves closed
+- **High-high level**: trips feed into that tank
+- **Pump trip**: run feedback lost while commanded → latches FAULTED
+- **Valve travel fault**: command/feedback deviation → latches FAULTED
+- **Sensor fault**: fails affected loop to safe manual output (0%)
+
+Faults are latched until operator reset, mirroring real safety systems.
+
+## Leak Detection
+
+Mass-balance detector compares measured flows against level-derived volume change. When the unexplained loss exceeds a threshold and sustains for a window, a leak event is recorded.
+
+**Tank leaks**: `plant.leaks[tag]` — uncontrolled outflow from the tank volume.
+
+**Valve/pipe leaks**: `plant.valve_leaks[tag]` — uncontrolled loss from the valve's upstream node.
+
+**Detection**: compares measured inflow/outflow against level change over LEAK_DETECT_WINDOW (8s). If sustained loss > LEAK_DETECT_MIN_RATE (0.3 L/s), raises alarm.
+
+**Persistence**: leak events stored in `data/leaks.json`, accessible via `/api/leaks`.
+
+## Sensor Fault Models
+
+Level transmitters can fail in several modes:
+- **OK**: normal operation with optional noise
+- **STUCK**: reads the value at the time of injection
+- **FAIL_HIGH**: reads full scale
+- **FAIL_LOW**: reads zero
+- **DRIFT**: linearly drifts from true value
+- **NAN**: returns NaN (propagates to PLC plausibility check)
