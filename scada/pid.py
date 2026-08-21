@@ -71,8 +71,11 @@ class PIDController:
     def _sign(self) -> float:
         return 1.0 if self.direct else -1.0
 
-    def update(self, pv: float, manual_mv: float | None = None) -> float:
-        """Advance one sample.  `manual_mv` (0..100) is used in MANUAL mode."""
+    def update(self, pv: float, manual_mv: float | None = None,
+               setpoint: float | None = None) -> float:
+        """Advance one sample.  `manual_mv` (0..100) is used in MANUAL mode;
+        `setpoint` overrides the controller setpoint for this sample only
+        (used by cascade outer -> inner setpoint positioning)."""
         if self._last_pv is None:
             self._last_pv = float(pv)
 
@@ -92,7 +95,8 @@ class PIDController:
             return self.mv
 
         self.pv = float(pv)
-        e = self.setpoint - self.pv
+        sp = self.setpoint if setpoint is None else float(setpoint)
+        e = sp - self.pv
         self.error = e
 
         # Proportional
@@ -124,8 +128,9 @@ class PIDController:
         self._last_pv = self.pv
         return self.mv
 
-    def _proportional(self) -> float:
-        return self._sign() * self.kp * (self.setpoint - self.pv)
+    def _proportional(self, setpoint: float | None = None) -> float:
+        sp = self.setpoint if setpoint is None else float(setpoint)
+        return self._sign() * self.kp * (sp - self.pv)
 
     # ------------------------------------------------------------------
     # Operator interface

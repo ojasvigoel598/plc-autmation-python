@@ -140,6 +140,27 @@ UI_REFRESH_DT = 0.10  # s
 SIM_SPEED = 1.0
 
 # ---------------------------------------------------------------------------
+# Advanced control: cascade and gain scheduling (opt-in)
+# ---------------------------------------------------------------------------
+# Level-level cascade: the outer loop (LIC-102, TK-102) positions the inner
+# loop's setpoint (LIC-101, TK-101) across a configured range.  Disabled by
+# default so the base behaviour (independent loops on operator setpoints) is
+# unchanged; set CASCADE_ENABLED = True for the cascade scheme.
+CASCADE_ENABLED = False
+CASCADE_INNER_SP_MIN = 0.3    # m : inner (LIC-101) setpoint range
+CASCADE_INNER_SP_MAX = 1.7    # m
+
+# Gain scheduling for LIC-101 by TK-101 level zone: (level fraction, kp, ki).
+# Low/high zones gain up for faster recovery / overflow protection; the
+# nominal zone keeps the tuned gains.
+GAIN_SCHEDULING_ENABLED = False
+GAIN_SCHEDULE = [
+    (0.00, 300.0, 80.0),
+    (0.35, 200.0, 50.0),
+    (0.80, 300.0, 80.0),
+]
+
+# ---------------------------------------------------------------------------
 # Alarm / interlock thresholds (fractions of tank height, 0..1)
 # ---------------------------------------------------------------------------
 LEVEL_LO = 0.10        # low-level warning

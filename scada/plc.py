@@ -332,6 +332,8 @@ class PLC:
         self.loop_manual_mv = {"LIC-101": 0.0, "LIC-102": 0.0}
         self.manual_valves = {"XV-102": 50.0, "XV-103": 50.0}
         self.manual_pump = 0.0
+        # Cascade outer -> inner setpoint (computed each scan when enabled).
+        self.cascade_inner_sp: float | None = None
 
         # --- PID controllers --------------------------------------------
         self.pids: dict[str, PIDController] = {}
@@ -550,30 +552,77 @@ class PLC:
                 self.state = self.STATE_IDLE
 
     def _network_control_loops(self, dt: float) -> None:
-        """Network: run the PID blocks (meaningful only while running)."""
+        """Network: run the PID blocks (meaningful only while running).
+
+        With cascade enabled (config.CASCADE_ENABLED), the outer loop
+        (LIC-102) runs first and its output positions the inner loop's
+        (LIC-101) setpoint within a configured range; otherwise each loop
+        tracks its operator setpoint independently.
+        """
         running = self.state in (self.STATE_STARTING, self.STATE_RUNNING)
-        for tag, pid in self.pids.items():
-            lt = config.PID_LOOPS[tag]["pv_tag"]
-            pv = self.ai.get(lt, 0.0)
-            sensor_fault = self._sensor_fault_latch[lt].q
+        if config.CASCADE_ENABLED:
+            self._run_loop("LIC-102", dt, running)
+            outer_mv = max(0.0, min(100.0, self.pids["LIC-102"].mv))
+            self.cascade_inner_sp = (
+                config.CASCADE_INNER_SP_MIN
+                + (outer_mv / 100.0)
+                * (config.CASCADE_INNER_SP_MAX - config.CASCADE_INNER_SP_MIN))
+            self._run_loop("LIC-101", dt, running)
+        else:
+            self.cascade_inner_sp = None
+            for tag in self.pids:
+                self._run_loop(tag, dt, running)
 
-            # Fail the loop to a safe manual output on a bad measurement.
-            if math.isnan(pv) or sensor_fault:
-                pid.set_mode("MANUAL", 0.0)
-                self.loop_mode[tag] = "MANUAL"
-                self.loop_manual_mv[tag] = 0.0
-                pid.update(pv if not math.isnan(pv) else 0.0, manual_mv=0.0)
-                continue
+    def _effective_setpoint(self, tag: str) -> float:
+        """The setpoint the loop actually controls this scan.  In cascade,
+        LIC-101's setpoint is positioned by the outer loop; other loops keep
+        their operator setpoint."""
+        if (config.CASCADE_ENABLED and tag == "LIC-101"
+                and self.cascade_inner_sp is not None):
+            return self.cascade_inner_sp
+        return self.pids[tag].setpoint
 
-            pid.set_mode(self.loop_mode[tag], self.loop_manual_mv[tag])
-            if running:
-                pid.update(pv, manual_mv=self.loop_manual_mv[tag])
-            else:
-                # Hold MV at the fail-safe value; keep PV fresh for display.
-                pid.pv = pv
-                pid.mv = 0.0
-                pid._integral = 0.0
-                pid.p_term = pid.i_term = pid.d_term = 0.0
+    def _schedule_gains(self, tag: str) -> None:
+        """Zone-based gain scheduling for LIC-101 (opt-in): gains step up in
+        the low and high level zones for faster recovery / overflow
+        protection, while the nominal zone keeps the tuned gains."""
+        if not config.GAIN_SCHEDULING_ENABLED or tag != "LIC-101":
+            return
+        pv = self.ai.get("LT-101", 0.0)
+        frac = pv / config.TANK_HEIGHT
+        kp, ki = config.GAIN_SCHEDULE[0][1], config.GAIN_SCHEDULE[0][2]
+        for lo, gkp, gki in config.GAIN_SCHEDULE:
+            if frac >= lo:
+                kp, ki = gkp, gki
+        self.pids[tag].set_tuning(kp=kp, ki=ki)
+
+    def _run_loop(self, tag: str, dt: float, running: bool) -> None:
+        """Advance one PID block for a scan: sensor-fault fail-safe, mode,
+        optional gain scheduling and cascade setpoint positioning."""
+        pid = self.pids[tag]
+        lt = config.PID_LOOPS[tag]["pv_tag"]
+        pv = self.ai.get(lt, 0.0)
+        sensor_fault = self._sensor_fault_latch[lt].q
+
+        # Fail the loop to a safe manual output on a bad measurement.
+        if math.isnan(pv) or sensor_fault:
+            pid.set_mode("MANUAL", 0.0)
+            self.loop_mode[tag] = "MANUAL"
+            self.loop_manual_mv[tag] = 0.0
+            pid.update(pv if not math.isnan(pv) else 0.0, manual_mv=0.0)
+            return
+
+        self._schedule_gains(tag)
+        pid.set_mode(self.loop_mode[tag], self.loop_manual_mv[tag])
+        if running:
+            pid.update(pv, manual_mv=self.loop_manual_mv[tag],
+                       setpoint=self._effective_setpoint(tag))
+        else:
+            # Hold MV at the fail-safe value; keep PV fresh for display.
+            pid.pv = pv
+            pid.mv = 0.0
+            pid._integral = 0.0
+            pid.p_term = pid.i_term = pid.d_term = 0.0
 
     def _network_interlocks_and_outputs(self, dt: float) -> None:
         """Network: map control outputs to the output image, apply interlocks."""
@@ -642,7 +691,8 @@ class PLC:
         pids = {}
         for tag, pid in self.pids.items():
             pids[tag] = {
-                "sp": pid.setpoint, "pv": pid.pv, "mv": pid.mv,
+                "sp": pid.setpoint, "sp_eff": self._effective_setpoint(tag),
+                "pv": pid.pv, "mv": pid.mv,
                 "mode": pid.mode, "kp": pid.kp, "ki": pid.ki, "kd": pid.kd,
                 "p": pid.p_term, "i": pid.i_term, "d": pid.d_term,
                 "saturated": pid.saturated, "error": pid.error,
