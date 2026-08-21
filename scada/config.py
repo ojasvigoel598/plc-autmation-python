@@ -56,6 +56,17 @@ PUMP_MAX_FLOW = 0.020   # m^3/s = 20 L/s
 PUMP_DROOP = 0.10       # fractional flow loss per metre of discharge head
 
 # ---------------------------------------------------------------------------
+# Reservoir (finite supply, mass-balanced)
+# ---------------------------------------------------------------------------
+# The reservoir is a finite source: the pump draws it down and a constant
+# makeup flow can refill it.  When it runs empty the pump starves (flow 0).
+# Sized so a normal demo session (minutes) is unaffected by depletion.
+RESERVOIR_AREA = 6.0          # m^2
+RESERVOIR_HEIGHT = 3.0        # m
+INITIAL_RESERVOIR_LEVEL = 3.0 # m
+RESERVOIR_MAKEUP_FLOW = 0.0   # m^3/s constant refill (0 = finite, drains)
+
+# ---------------------------------------------------------------------------
 # Motorised valves (orifice model)
 # ---------------------------------------------------------------------------
 # Q = u * KV * sqrt(max(0, head))   [m^3/s]

@@ -112,6 +112,11 @@ class LeakRequest(BaseModel):
     flow_m3s: float = Field(ge=0.0, le=0.05)
 
 
+class ValveLeakRequest(BaseModel):
+    tag: Literal["XV-101", "XV-102", "XV-103"]
+    flow_m3s: float = Field(ge=0.0, le=0.05)
+
+
 # ---------------------------------------------------------------------------
 # Simulation loop
 # ---------------------------------------------------------------------------
@@ -418,6 +423,11 @@ def create_app(start_loop: bool = True) -> FastAPI:
     async def set_leak(req: LeakRequest) -> dict:
         runtime.set_leak(req.tank, req.flow_m3s)
         return {"ok": True, "tank": req.tank, "flow_m3s": req.flow_m3s}
+
+    @app.post("/api/faults/valve_leak")
+    async def valve_leak(req: ValveLeakRequest) -> dict:
+        runtime.set_valve_leak(req.tag, req.flow_m3s)
+        return {"ok": True, "tag": req.tag, "flow_m3s": req.flow_m3s}
 
     return app
 

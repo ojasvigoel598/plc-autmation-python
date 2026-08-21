@@ -158,6 +158,7 @@ class Plant:
 
         self.levels = {tag: float(config.INITIAL_LEVELS[tag]) for tag in self.tanks}
         self.t = 0.0
+        self.reservoir_level = float(config.INITIAL_RESERVOIR_LEVEL)
 
         # Flow telemetry (m^3/s) recomputed every integration step.
         self.flows = {"P-101": 0.0, "XV-101": 0.0, "XV-102": 0.0, "XV-103": 0.0,
@@ -175,6 +176,9 @@ class Plant:
 
         # Leaks (process disturbances): uncontrolled outflow per tank (m^3/s).
         self.leaks = {tag: 0.0 for tag in self.tanks}
+
+        # Valve/pipe leaks: uncontrolled loss from a valve's upstream node.
+        self.valve_leaks = {tag: 0.0 for tag in self.valves}
 
         self.rng = np.random.default_rng(1234)
 
@@ -216,6 +220,9 @@ class Plant:
         u = pump.effective_speed()
         if u <= 0.0:
             return 0.0
+        # A pump cannot draw from an empty reservoir.
+        if self.reservoir_level <= 0.0:
+            return 0.0
         head = self._head_of(levels, "TK-101")
         droop = max(0.0, 1.0 - pump.droop * head)
         return u * pump.max_flow * droop
@@ -245,6 +252,13 @@ class Plant:
             # Uncontrolled leak acts as an extra outflow (only from a
             # non-empty tank).
             leak = self.leaks.get(tag, 0.0) if levels[tag] > 0.0 else 0.0
+            # Valve/pipe leaks: uncontrolled loss from this tank when it is
+            # the upstream node of a leaking valve.
+            for vtag, valve in self.valves.items():
+                if valve.upstream == tag:
+                    vleak = self.valve_leaks.get(vtag, 0.0)
+                    if vleak > 0.0 and levels[tag] > 0.0:
+                        q_out += vleak
             dh[tag] = (q_in - q_out - leak) / tank.area
         return dh
 
@@ -310,6 +324,13 @@ class Plant:
         # Recompute flows at the final state for telemetry.
         self.flows = self._flows(self.levels)
         self.flows["overflow"] = overflow_rate
+        # Reservoir mass balance: pump draw minus constant makeup flow.
+        self.reservoir_level += ((config.RESERVOIR_MAKEUP_FLOW
+                                  - self.flows["P-101"]) * dt
+                                 / config.RESERVOIR_AREA)
+        self.reservoir_level = max(0.0,
+                                   min(config.RESERVOIR_HEIGHT,
+                                       self.reservoir_level))
 
     # ------------------------------------------------------------------
     # Telemetry

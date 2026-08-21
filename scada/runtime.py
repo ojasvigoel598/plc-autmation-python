@@ -50,6 +50,8 @@ class Runtime:
         self.valve_stuck: dict[str, bool] = {t: False for t in ("XV-101", "XV-102", "XV-103")}
         self.valve_stuck_pos: dict[str, float] = {t: 0.0 for t in self.valve_stuck}
         self.leaks: dict[str, float] = {t: 0.0 for t in config.TANKS}
+        self.valve_leaks: dict[str, float] = {t: 0.0
+                                              for t in ("XV-101", "XV-102", "XV-103")}
 
         # Leak detection & persistent event log.
         self.leak_store = leak_store if leak_store is not None else LeakStore()
@@ -115,6 +117,7 @@ class Runtime:
 
         # Apply leaks (process disturbances) to the plant.
         plant.leaks = dict(self.leaks)
+        plant.valve_leaks = dict(self.valve_leaks)
         if self.plant.t < self._disturbance_until:
             plant.leaks[self._disturbance_tank] = self._disturbance_flow
 
@@ -251,6 +254,15 @@ class Runtime:
         if tank in self.leaks:
             self.leaks[tank] = max(0.0, float(flow_m3s))
 
+    def set_valve_leak(self, tag: str, flow_m3s: float) -> None:
+        """Leak on a transfer valve/pipe: loss from the valve's upstream node."""
+        if tag in self.valve_leaks:
+            self.valve_leaks[tag] = max(0.0, float(flow_m3s))
+
+    def clear_valve_leak(self, tag: str) -> None:
+        if tag in self.valve_leaks:
+            self.valve_leaks[tag] = 0.0
+
     def inject_disturbance(self, tank: str = "TK-102",
                            flow_m3s: float = 0.004, duration: float = 30.0) -> None:
         """Step-like leak on a tank that auto-clears after `duration` seconds."""
@@ -278,6 +290,7 @@ class Runtime:
             "valve_stuck": dict(self.valve_stuck),
             "blocked": {t: v.blocked for t, v in plant.valves.items()},
             "leaks": dict(self.leaks),
+            "valve_leaks": dict(self.valve_leaks),
             "disturbance_active": plant.t < self._disturbance_until,
         }
 
@@ -307,6 +320,7 @@ class Runtime:
 
         return {
             "t": plant.t,
+            "reservoir_level": plant.reservoir_level,
             "state": plc.state,
             "estop": plc.i["I0.0_ESTOP"],
             "levels": levels,
