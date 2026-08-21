@@ -489,11 +489,53 @@ reflected in the operating-state machine above.
 
 ## 13. Future improvements
 
-* Cascade or feed-forward control, gain scheduling.
-* OPC UA gateway (the Modbus TCP server is already included).
-* Extend the leak model to pipes and valves (currently tanks only).
+Every item below was checked against the current codebase; the parenthetical
+notes state the verified starting point.
+
+### Control & automation
+
+* Cascade or feed-forward control, gain scheduling (the two PID loops are
+  currently independent and fixed-gain).
 * More unit operations (heat exchanger, pressure loop, conveyor).
-* Persist alarms to the historian (trends already persist to SQLite).
+
+### Integration & field standards
+
+* OPC UA gateway (the Modbus TCP server is already included).
+* Field-protocol security: Modbus TCP currently binds `0.0.0.0:502` with no
+  authentication (inherent to the protocol) — needs TLS/Security or a private
+  field network before real hardware is attached.
+
+### Process model
+
+* Extend the leak model to pipes and valves (currently tanks only).
+* Finite-reservoir mass balance (the reservoir is currently an infinite
+  head source in `process.py`).
+
+### Historian & operations
+
+* Persist alarms to the historian (trends already persist to SQLite; the
+  alarm journal is in-memory only and is lost on restart).
+* Historian retention/pruning — the SQLite store grows unbounded at the full
+  10 Hz sample rate, and a corrupt database is silently recreated empty.
+
+### Security & hardening (required before real/public operation)
+
+* Authentication, authorization and an operator action audit log — every
+  `/api/control/*`, `/api/faults/*` and `/ws` endpoint is currently
+  unauthenticated (fine for a public demo, not for real operation).
+* Rate limiting and WebSocket client caps (no limits exist today).
+* Multi-process-safe architecture — plant/PLC state is module-level, so
+  running more than one uvicorn worker would fork separate simulations.
+
+### Delivery & reliability
+
+* CI pipeline running the test suite on every push (tests currently run
+  locally only).
+* Reproducible dependency builds (`requirements.txt` uses `>=` ranges with
+  no lockfile).
+
+### 3D
+
 * WebXR/VR walkthrough of the 3D plant.
 
 ## License
