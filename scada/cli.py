@@ -35,6 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Modbus TCP listen port (default 502)")
     parser.add_argument("--no-modbus", action="store_true",
                         help="disable the Modbus TCP field interface")
+    parser.add_argument("--workers", type=int, default=1,
+                        help="uvicorn worker count.  Only 1 is supported: "
+                             "the simulation owns module-level state, so "
+                             "multiple workers would fork separate plants.")
     return parser
 
 
@@ -50,8 +54,13 @@ def main(argv: list[str] | None = None) -> None:
     if args.no_modbus:
         config.MODBUS_ENABLED = False
 
+    if args.workers != 1:
+        raise SystemExit(
+            "error: the SCADA simulation is single-process by design "
+            "(plant/PLC state is module-level); --workers must be 1")
+
     uvicorn.run("scada.server:app", host=args.host, port=args.port,
-                log_level="info")
+                log_level="info", workers=args.workers)
 
 
 if __name__ == "__main__":
