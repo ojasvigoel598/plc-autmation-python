@@ -18,6 +18,8 @@ import asyncio
 import json
 import logging
 import os
+import time
+from dataclasses import asdict
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -39,6 +41,9 @@ STATIC_DIR = Path(__file__).parent / "static"
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 logger = logging.getLogger("scada.server")
+
+# Server start time for uptime metrics.
+_start_time = time.monotonic()
 
 _audit_lock = threading.Lock()
 
@@ -517,6 +522,47 @@ def create_app(start_loop: bool = True) -> FastAPI:
     async def valve_leak(req: ValveLeakRequest) -> dict:
         runtime.set_valve_leak(req.tag, req.flow_m3s)
         return {"ok": True, "tag": req.tag, "flow_m3s": req.flow_m3s}
+
+    # ---- Observability -------------------------------------------------
+    @app.get("/healthz")
+    async def healthz() -> JSONResponse:
+        """Liveness probe: returns 200 if the server process is alive."""
+        return JSONResponse({"status": "alive"})
+
+    @app.get("/readyz")
+    async def readyz() -> JSONResponse:
+        """Readiness probe: returns 200 if the simulation is running."""
+        ready = loop_task is not None and not loop_task.done()
+        status = 200 if ready else 503
+        return JSONResponse({"status": "ready" if ready else "not ready",
+                            "simulation": runtime.plc.state},
+                           status_code=status)
+
+    @app.get("/api/metrics")
+    async def metrics() -> JSONResponse:
+        """System metrics: uptime, scan count, loop rate, queue depth."""
+        return JSONResponse({
+            "uptime_s": round(time.monotonic() - _start_time, 1),
+            "scan_count": runtime.plc.scan_count,
+            "plc_state": runtime.plc.state,
+            "ws_clients": len(clients),
+            "ws_queue_depths": {id(ws): q.qsize() for ws, q in client_queues.items()},
+            "process_units": {
+                "hx_T_cold_out": runtime.units.hx.cold_out,
+                "pk_pressure_bar": runtime.units.pressure.pressure_bar,
+                "cv_speed": runtime.units.conveyor.speed,
+            },
+            "alarms_active": len(runtime.plc.alarms.active),
+            "alarm_history_count": len(runtime.plc.alarms.history),
+        })
+
+    @app.get("/api/events")
+    async def get_events(n: int = 50) -> JSONResponse:
+        """Recent system events (state transitions, alarms, commands)."""
+        from .events import get_store
+        store = get_store()
+        return JSONResponse({"events": [asdict(e) for e in store.recent(n)],
+                            "summary": store.summary()})
 
     return app
 
