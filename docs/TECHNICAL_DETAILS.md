@@ -114,3 +114,30 @@ Level transmitters can fail in several modes:
 - **FAIL_LOW**: reads zero
 - **DRIFT**: linearly drifts from true value
 - **NAN**: returns NaN (propagates to PLC plausibility check)
+
+## Process Units
+
+### Heat Exchanger (HX-101)
+
+Two-stream counter-flow with thermal inertia:
+- Hot side: shell, fluid loses heat
+- Cold side: tube, fluid gains heat
+- True log-mean temperature difference (not arithmetic mean)
+- Energy balance in mass flow (m_dot = rho * Q)
+- Fouling parameter reduces effective UA
+
+### Pressure Vessel (PK-101)
+
+Pressurised gas volume with inlet flow and modulating outlet:
+- Ideal gas dynamics: `dP/dt = (Qin - Qout) * P / V`
+- Orifice equation across outlet valve
+- PID-controlled outlet valve position
+- Pressure alarms (HI, HIHI, LO)
+
+### Conveyor (CV-101)
+
+Belt conveyor with AC motor drive:
+- Motor model: `J * dw/dt = T_motor - T_load - T_friction`
+- Variable speed via VFD
+- Jam detection (sustained low speed)
+- Runtime accumulation
