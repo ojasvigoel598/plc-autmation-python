@@ -219,6 +219,19 @@ class AlarmManager:
         self.active: dict[str, Alarm] = {}
         self.history: list[Alarm] = []
         self.max_history = max_history
+        # Optional observer for durable alarm journaling (RAISE/ACK/CLEAR).
+        self._event_cb = None
+
+    def set_event_callback(self, cb) -> None:
+        """Register ``cb(action, alarm, t)`` called on each alarm transition."""
+        self._event_cb = cb
+
+    def _emit(self, action: str, alarm: Alarm, t: float) -> None:
+        if self._event_cb is not None:
+            try:
+                self._event_cb(action, alarm, t)
+            except Exception:
+                pass  # a failing observer must never break alarm handling
 
     def raise_alarm(self, tag: str, message: str, priority: str,
                     t: float, auto_ack: bool = False) -> None:
@@ -232,18 +245,21 @@ class AlarmManager:
         self.active[tag] = alarm
         self.history.append(alarm)
         self._trim()
+        self._emit("RAISE", alarm, t)
 
     def clear_alarm(self, tag: str, t: float) -> None:
         alarm = self.active.pop(tag, None)
         if alarm is not None:
             alarm.active = False
             alarm.t_clear = t
+            self._emit("CLEAR", alarm, t)
 
     def acknowledge(self, tag: str, t: float) -> bool:
         alarm = self.active.get(tag)
         if alarm is not None and not alarm.acked:
             alarm.acked = True
             alarm.t_ack = t
+            self._emit("ACK", alarm, t)
             return True
         return False
 
@@ -253,6 +269,7 @@ class AlarmManager:
             if not alarm.acked:
                 alarm.acked = True
                 alarm.t_ack = t
+                self._emit("ACK", alarm, t)
                 n += 1
         return n
 

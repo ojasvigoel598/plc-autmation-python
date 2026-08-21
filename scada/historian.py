@@ -13,12 +13,16 @@ be added without a schema migration.
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 from . import config
+
+logger = logging.getLogger("scada.historian")
 
 # Column name reserved for the timestamp inside each history record.
 TIME_KEY = "t"
@@ -41,22 +45,59 @@ class TrendStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = Path(path) if path else _default_path()
         self._lock = threading.Lock()
+        self._inserts = 0   # rows inserted since the last retention prune
         self._conn = self._open()
 
     def _open(self) -> sqlite3.Connection:
+        """Open the store, quarantining (not silently discarding) a corrupt
+        database: the broken file is renamed with a ``.corrupt-<ts>`` suffix
+        and an ERROR is logged, then an empty store is created."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            return self._connect()
+        except sqlite3.DatabaseError:
+            logger.error("trend store corrupt at %s; quarantining and "
+                         "recreating empty", self.path, exc_info=True)
+            try:
+                self.path.replace(self.path.with_suffix(
+                    self.path.suffix + f".corrupt-{int(time.time())}"))
+            except OSError:
+                pass
+            return self._connect()
+
+    def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.path), check_same_thread=False)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS samples ("
-            " ts REAL NOT NULL,"
-            " series TEXT NOT NULL,"
-            " value REAL NOT NULL)")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_samples_series_ts "
-            "ON samples (series, ts)")
-        conn.commit()
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS samples ("
+                " ts REAL NOT NULL,"
+                " series TEXT NOT NULL,"
+                " value REAL NOT NULL)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_samples_series_ts "
+                "ON samples (series, ts)")
+            # Durable alarm journal (raised/acked/cleared transitions).
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS alarm_events ("
+                " tag TEXT NOT NULL,"
+                " message TEXT NOT NULL,"
+                " priority TEXT NOT NULL,"
+                " action TEXT NOT NULL,"
+                " t REAL NOT NULL,"
+                " wall REAL NOT NULL)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_alarm_events_t "
+                "ON alarm_events (t)")
+            conn.commit()
+            return conn
+        except sqlite3.DatabaseError:
+            # Release the handle so the corrupt file can be renamed away.
+            try:
+                conn.close()
+            except Exception:
+                pass
+            raise
 
     # -- writes -----------------------------------------------------------
     def insert(self, records: list[dict]) -> int:
@@ -77,7 +118,48 @@ class TrendStore:
             self._conn.executemany(
                 "INSERT INTO samples (ts, series, value) VALUES (?, ?, ?)", rows)
             self._conn.commit()
+            self._prune_if_needed(len(rows))
         return len(rows)
+
+    def _prune_if_needed(self, inserted: int) -> None:
+        """Enforce the retention cap (oldest rows pruned by insertion order)
+        roughly once per 10k inserted samples, keeping the store bounded."""
+        self._inserts += inserted
+        if self._inserts < 10000:
+            return
+        self._inserts = 0
+        max_rows = config.HISTORIAN_MAX_ROWS
+        cur = self._conn.execute("SELECT MAX(rowid) FROM samples")
+        total = cur.fetchone()[0] or 0
+        overage = total - max_rows
+        if overage > 0:
+            self._conn.execute(
+                "DELETE FROM samples WHERE rowid IN "
+                "(SELECT rowid FROM samples ORDER BY rowid LIMIT ?)",
+                (overage,))
+            self._conn.commit()
+
+    # -- alarm journal ----------------------------------------------------
+    def record_alarm_event(self, tag: str, message: str, priority: str,
+                           action: str, t: float) -> None:
+        """Persist one alarm transition (RAISE / ACK / CLEAR)."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO alarm_events (tag, message, priority, action, "
+                "t, wall) VALUES (?, ?, ?, ?, ?, ?)",
+                (tag, message, priority, action, float(t), time.time()))
+            self._conn.commit()
+
+    def alarm_history(self, limit: int = 200) -> list[dict]:
+        """Most recent alarm transitions, newest first."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT tag, message, priority, action, t, wall "
+                "FROM alarm_events ORDER BY t DESC, wall DESC LIMIT ?",
+                (max(1, int(limit)),))
+            return [{"tag": r[0], "message": r[1], "priority": r[2],
+                     "action": r[3], "t": r[4], "wall": r[5]}
+                    for r in cur.fetchall()]
 
     # -- reads ------------------------------------------------------------
     def series(self) -> list[str]:

@@ -176,6 +176,10 @@ LEAK_HISTORY_LIMIT = 30        # latest N events surfaced to the frontend
 # sim loop never blocks on a per-sample disk write.
 HISTORIAN_FLUSH_SCANS = 10
 
+# Retention cap: keep at most this many trend samples (pruned by insertion
+# order); alarm events are small and kept separately, so they are not capped.
+HISTORIAN_MAX_ROWS = 2_000_000
+
 
 # ---------------------------------------------------------------------------
 # 3D scene layout (visualisation metadata, world units = metres)

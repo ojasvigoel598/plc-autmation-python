@@ -182,6 +182,10 @@ async def lifespan(app: FastAPI):
     global loop_task, modbus_server, trend_store
     trend_store = TrendStore()
     runtime.historian = trend_store
+    # Durable alarm journal: every RAISE/ACK/CLEAR transition is persisted.
+    runtime.plc.alarms.set_event_callback(
+        lambda action, alarm, t: trend_store.record_alarm_event(
+            alarm.tag, alarm.message, alarm.priority, action, t))
     loop_task = asyncio.create_task(_sim_loop())
     if config.MODBUS_ENABLED:
         modbus_server = ModbusServer(lambda: runtime.plc,
@@ -252,6 +256,13 @@ def create_app(start_loop: bool = True) -> FastAPI:
     async def get_history_series() -> JSONResponse:
         store = runtime.historian
         return JSONResponse({"series": store.series() if store else []})
+
+    @app.get("/api/alarms/history")
+    async def get_alarm_history(limit: int = 200) -> JSONResponse:
+        store = runtime.historian
+        if store is None:
+            return JSONResponse({"events": []})
+        return JSONResponse({"events": store.alarm_history(limit)})
 
     @app.get("/api/trends/history")
     async def get_history(series: str, t0: float | None = None,
