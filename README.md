@@ -78,3 +78,30 @@ The PLC detects these and latches alarms until operator reset.
 5. Switch back to **AUTO** → bumpless transfer
 6. Inject a **fault** → observe alarm, interlock, safe state
 7. Press **RESET** → clear fault
+
+## Testing
+
+```bash
+python -m pytest tests/ -q
+```
+
+~200 tests covering: physics, PID, PLC blocks, alarms, API, Modbus, historian, leaks, robustness, observability, security, and model validation against closed-form solutions.
+
+## Architecture
+
+```
+React + Three.js 3D twin → WebSocket → FastAPI backend
+                                       ↓
+                            RUNTIME (field bus)
+                            sensors → PLC → actuators → plant
+                                       ↓
+                            PLC engine + process model
+```
+
+## Documentation
+
+- `docs/PLCSim_Engineering_Guide.docx` — full walkthrough
+- `docs/PLC_CONCEPTS.md` — PLC fundamentals
+- `docs/COMPARATIVE_ANALYSIS.md` vs OpenPLC, Beremiz, commercial tools
+- `docs/DEPLOYMENT.md` — Render deployment, security
+- `docs/TECHNICAL_DETAILS.md` — physics models, validation, limitations
