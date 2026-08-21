@@ -141,3 +141,31 @@ Belt conveyor with AC motor drive:
 - Variable speed via VFD
 - Jam detection (sustained low speed)
 - Runtime accumulation
+
+## High Availability
+
+When `SCADA_HA=1`, the server runs in HA mode:
+- **Lease-based leader election** via SQLite
+- **Fencing**: state writes require valid lease token
+- **Checkpoints**: periodic state snapshots for failover
+- **Standby**: serves read-only until lease expires, then takes over
+
+Requires multi-process (uvicorn --workers N). See `scada/ha.py`.
+
+## OPC UA Gateway
+
+Optional OPC UA server mirroring the PLC I/O image:
+- Requires `asyncua` package
+- Enable with `OPCUA_ENABLED=1`
+- Exposes nodes for all PLC I/O points
+- Accepts validated writes (routed through PLC setters)
+- Username/password authentication
+
+## Security Controls
+
+- **API authentication**: Bearer token via `SCADA_API_TOKEN`
+- **Rate limiting**: per-IP sliding window (120 requests/min)
+- **WebSocket cap**: max 50 concurrent clients
+- **Modbus allowlist**: restrict client IPs via `MODBUS_ALLOWED_CLIENTS`
+- **Input validation**: Pydantic models on all POST endpoints
+- **Audit log**: JSONL file of all control actions
