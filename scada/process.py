@@ -185,15 +185,6 @@ class Plant:
     # ------------------------------------------------------------------
     # Geometry helpers
     # ------------------------------------------------------------------
-    def _head(self, tag: str) -> float:
-        """Hydraulic head of a node relative to the drain datum."""
-        if tag == "reservoir":
-            return config.TANK_HEIGHT + 0.5  # large, effectively fixed head
-        if tag == "drain":
-            return 0.0
-        tank = self.tanks[tag]
-        return tank.z_base + self.levels[tag]
-
     def _valve_flow(self, valve: Valve, levels: dict[str, float]) -> float:
         u = valve.effective_open()
         if u <= 0.0:
