@@ -42,6 +42,22 @@ logger = logging.getLogger("scada.server")
 
 _audit_lock = threading.Lock()
 
+# Per-client-IP sliding window of control/fault POST timestamps.
+_rate_buckets: dict[str, list[float]] = {}
+_rate_lock = threading.Lock()
+
+
+def _rate_limited(client: str) -> bool:
+    """True if this client exceeds the per-minute control-action budget."""
+    now = time.monotonic()
+    with _rate_lock:
+        bucket = _rate_buckets.setdefault(client, [])
+        bucket[:] = [t for t in bucket if now - t < 60.0]
+        if len(bucket) >= config.CONTROL_RATE_LIMIT:
+            return True
+        bucket.append(now)
+        return False
+
 
 def _audit_path() -> Path:
     """Operator-action audit log path (overridable for tests)."""
@@ -83,6 +99,9 @@ class _GuardMiddleware(BaseHTTPMiddleware):
                 "client": client,
                 "body": body.decode("utf-8", "replace"),
             })
+            if _rate_limited(client):
+                return JSONResponse({"detail": "rate limit exceeded"},
+                                    status_code=429)
             if config.API_TOKEN:
                 auth = request.headers.get("authorization", "")
                 if auth != f"Bearer {config.API_TOKEN}":
@@ -342,6 +361,9 @@ def create_app(start_loop: bool = True) -> FastAPI:
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
+        if len(clients) >= config.MAX_WS_CLIENTS:
+            await ws.close(code=1013)   # try again later
+            return
         await ws.accept()
         queue: asyncio.Queue = asyncio.Queue(maxsize=MAX_QUEUE)
         clients.add(ws)

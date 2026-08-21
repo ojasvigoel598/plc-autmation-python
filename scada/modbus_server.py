@@ -31,6 +31,7 @@ import struct
 import threading
 from typing import Callable
 
+from . import config
 from . import modbus_map as mm
 
 logger = logging.getLogger("scada.modbus")
@@ -87,6 +88,11 @@ class ModbusServer:
         self._thread: threading.Thread | None = None
         self.host = host
         self.port = port
+        # Client IP allowlist; empty set = allow all (backwards-compatible).
+        self.allowed_clients: set[str] = set(config.MODBUS_ALLOWED_CLIENTS)
+
+    def _client_allowed(self, client_ip: str) -> bool:
+        return not self.allowed_clients or client_ip in self.allowed_clients
 
     # -- lifecycle -------------------------------------------------------
     def start(self) -> None:
@@ -288,6 +294,11 @@ def _make_handler(server: ModbusServer):
     class Handler(socketserver.BaseRequestHandler):
         def handle(self) -> None:
             sock: socket.socket = self.request
+            client_ip = self.client_address[0]
+            if not server._client_allowed(client_ip):
+                logger.warning("Modbus connection from %s rejected "
+                                "(not in allowlist)", client_ip)
+                return
             sock.settimeout(10.0)
             self.sock = sock
             while True:

@@ -182,6 +182,26 @@ API_TOKEN = os.environ.get("SCADA_API_TOKEN", "")
 # Every operator action is appended to this JSONL audit log (one JSON object
 # per line: timestamp, endpoint, client IP, request body).
 AUDIT_LOG_FILE = "data/audit.jsonl"  # relative to the repository root
+
+# ---------------------------------------------------------------------------
+# Security: rate limiting and connection caps
+# ---------------------------------------------------------------------------
+# Cap on simultaneous WebSocket telemetry clients (each holds a queue + task).
+MAX_WS_CLIENTS = 50
+
+# Per-client-IP sliding-window limit on control/fault POSTs per minute.
+CONTROL_RATE_LIMIT = 120
+
+# ---------------------------------------------------------------------------
+# Security: Modbus TCP client allowlist
+# ---------------------------------------------------------------------------
+# Comma-separated client IPs allowed to connect; empty = allow all
+# (backwards-compatible).  Real deployments should restrict this or isolate
+# port 502 on a private field network.
+MODBUS_ALLOWED_CLIENTS: set[str] = {
+    ip.strip() for ip in os.environ.get("MODBUS_ALLOWED_CLIENTS", "").split(",")
+    if ip.strip()
+}
 LEAK_DETECT_WINDOW = 8.0      # s : integration window for the balance check
 LEAK_DETECT_MIN_RATE = 0.0003  # m^3/s (0.3 L/s) : smallest reportable leak
                                # (a rate sustained over the window implies the
