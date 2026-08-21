@@ -169,3 +169,24 @@ Optional OPC UA server mirroring the PLC I/O image:
 - **Modbus allowlist**: restrict client IPs via `MODBUS_ALLOWED_CLIENTS`
 - **Input validation**: Pydantic models on all POST endpoints
 - **Audit log**: JSONL file of all control actions
+
+## Engineering Limitations
+
+This is an educational simulation, not a certified PLC or plant model:
+
+- The PLC is a single-threaded Python scan loop, not IEC 61131-3 runtime
+- Fluids are ideal and incompressible (no water hammer, no viscosity effects)
+- Orifice/pump equations are lumped-parameter approximations
+- Transmitters and faults are simplified models
+- Leaks are modelled at tanks only (not pipes, pumps, or valves)
+- No product identity tracking or CIP/cleaning model
+- The leak detector uses true levels (not noisy field instruments)
+- A Modbus TCP server exposes the I/O image, but cannot drive a real PLC
+
+## Comparisons
+
+See `docs/COMPARATIVE_ANALYSIS.md` for positioning vs:
+- OpenPLC (real PLC runtime)
+- Beremiz (IEC 61131-3 IDE)
+- Commercial virtual commissioning tools
+- Digital twin literature
