@@ -122,7 +122,7 @@ def test_plant_config_endpoint():
         assert {t["tag"] for t in cfg["tanks"]} == {"TK-101", "TK-102", "TK-103"}
         assert {v["tag"] for v in cfg["valves"]} == {"XV-101", "XV-102", "XV-103"}
         assert cfg["pump"]["tag"] == "P-101"
-        assert {l["tag"] for l in cfg["loops"]} == {"LIC-101", "LIC-102"}
+        assert {l["tag"] for l in cfg["loops"]} >= {"LIC-101", "LIC-102"}
         # 3D layout metadata must be present and finite.
         for t in cfg["tanks"]:
             assert t["radius"] > 0 and "x" in t

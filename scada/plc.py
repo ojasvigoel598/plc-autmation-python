@@ -315,6 +315,9 @@ class PLC:
         # --- I/O image tables -------------------------------------------
         self.ai: dict[str, float] = {f"LT-{n}": 0.0 for n in (101, 102, 103)}
         self.ai.update({f"XV-{n}_FB": 0.0 for n in (101, 102, 103)})
+        # Additional process units: temperature and pressure transmitters
+        self.ai["TT-101"] = 0.0   # heat exchanger cold outlet temperature (K)
+        self.ai["PT-101"] = 101325.0  # pressure vessel pressure (Pa)
         self.i: dict[str, bool] = {
             "I0.0_ESTOP": False,
             "I0.1_START": False,
@@ -323,13 +326,18 @@ class PLC:
             "I0.4_PUMP_FB": False,
         }
         self.aq: dict[str, float] = {t: 0.0 for t in ("P-101", "XV-101", "XV-102", "XV-103")}
+        # Additional actuators: heat exchanger cold flow valve, pressure control valve
+        self.aq["FV-101"] = 0.0    # heat exchanger cold-side flow control valve (%)
+        self.aq["PCV-101"] = 0.0   # pressure vessel outlet control valve (%)
         self.q: dict[str, bool] = {"Q0.0_PUMP": False, "Q0.1_HORN": False,
                                    "Q0.2_LIGHT": False, "Q0.3_STATUS": True}
         self.m: dict[str, bool] = {}
 
         # --- Operator setpoints held in data registers ------------------
-        self.loop_mode = {"LIC-101": "AUTO", "LIC-102": "AUTO"}
-        self.loop_manual_mv = {"LIC-101": 0.0, "LIC-102": 0.0}
+        self.loop_mode = {"LIC-101": "AUTO", "LIC-102": "AUTO",
+                         "TIC-101": "AUTO", "PIC-101": "AUTO"}
+        self.loop_manual_mv = {"LIC-101": 0.0, "LIC-102": 0.0,
+                              "TIC-101": 0.0, "PIC-101": 0.0}
         self.manual_valves = {"XV-102": 50.0, "XV-103": 50.0}
         self.manual_pump = 0.0
         # Cascade outer -> inner setpoint (computed each scan when enabled).
@@ -436,6 +444,7 @@ class PLC:
         # PROGRAM SCAN: execute networks in order.
         self._network_sensor_plausibility(dt)
         self._network_level_alarms()
+        self._network_process_alarms()  # temperature and pressure
         self._network_state_machine(start_edge, stop_edge, reset_edge, estop)
         self._network_control_loops(dt)
         self._network_interlocks_and_outputs(dt)
@@ -497,6 +506,45 @@ class PLC:
                 self.alarms.raise_alarm(f"LSL-{n}", f"{tank} LOW level", "WARNING", self.t)
             else:
                 self.alarms.clear_alarm(f"LSL-{n}", self.t)
+
+    def _network_process_alarms(self) -> None:
+        """Network: temperature and pressure alarms from additional units."""
+        # Temperature alarms (heat exchanger cold outlet).
+        t = self.ai.get("TT-101", 0.0)
+        if not math.isnan(t):
+            if t >= config.TEMP_HIHI:
+                self.alarms.raise_alarm("TSHH-101", "HX cold outlet HIGH-HIGH temperature",
+                                        "CRITICAL", self.t)
+            else:
+                self.alarms.clear_alarm("TSHH-101", self.t)
+            if t >= config.TEMP_HI:
+                self.alarms.raise_alarm("TSH-101", "HX cold outlet HIGH temperature",
+                                        "HIGH", self.t)
+            else:
+                self.alarms.clear_alarm("TSH-101", self.t)
+            if t <= config.TEMP_LO:
+                self.alarms.raise_alarm("TSL-101", "HX cold outlet LOW temperature",
+                                        "WARNING", self.t)
+            else:
+                self.alarms.clear_alarm("TSL-101", self.t)
+        # Pressure alarms (pressure vessel).
+        p = self.ai.get("PT-101", 0.0)
+        if not math.isnan(p):
+            if p >= config.PRESSURE_HIHI:
+                self.alarms.raise_alarm("PSHH-101", "PK high-high pressure",
+                                        "CRITICAL", self.t)
+            else:
+                self.alarms.clear_alarm("PSHH-101", self.t)
+            if p >= config.PRESSURE_HI:
+                self.alarms.raise_alarm("PSH-101", "PK high pressure",
+                                        "HIGH", self.t)
+            else:
+                self.alarms.clear_alarm("PSH-101", self.t)
+            if p <= config.PRESSURE_LO:
+                self.alarms.raise_alarm("PSL-101", "PK low pressure",
+                                        "WARNING", self.t)
+            else:
+                self.alarms.clear_alarm("PSL-101", self.t)
 
     def _network_state_machine(self, start_edge, stop_edge, reset_edge, estop) -> None:
         """Network: ISA-88 / PackML operating state machine."""
@@ -602,7 +650,10 @@ class PLC:
         pid = self.pids[tag]
         lt = config.PID_LOOPS[tag]["pv_tag"]
         pv = self.ai.get(lt, 0.0)
-        sensor_fault = self._sensor_fault_latch[lt].q
+        # Sensor fault latch exists only for level transmitters (LT-101..103);
+        # temperature / pressure loops have their own alarm logic in the PLC
+        # scan but no per-loop fault latch here.
+        sensor_fault = self._sensor_fault_latch[lt].q if lt in self._sensor_fault_latch else False
 
         # Fail the loop to a safe manual output on a bad measurement.
         if math.isnan(pv) or sensor_fault:
@@ -636,8 +687,17 @@ class PLC:
         if self.loop_mode["LIC-101"] == "MANUAL":
             pump_cmd = self.manual_pump
 
+        # Additional process unit control outputs (TIC-101 and PIC-101)
+        tic_cmd = self.pids["TIC-101"].mv
+        pic_cmd = self.pids["PIC-101"].mv
+        if self.loop_mode["TIC-101"] == "MANUAL":
+            tic_cmd = self.loop_manual_mv["TIC-101"]
+        if self.loop_mode["PIC-101"] == "MANUAL":
+            pic_cmd = self.loop_manual_mv["PIC-101"]
+
         if not running:
             pump_cmd = v1_cmd = v2_cmd = v3_cmd = 0.0
+            tic_cmd = pic_cmd = 0.0
 
         # Interlocks (highest authority wins).
         estop = self.i["I0.0_ESTOP"]
@@ -662,6 +722,8 @@ class PLC:
         self.aq["XV-101"] = max(0.0, min(100.0, v1_cmd))
         self.aq["XV-102"] = max(0.0, min(100.0, v2_cmd))
         self.aq["XV-103"] = max(0.0, min(100.0, v3_cmd))
+        self.aq["FV-101"] = max(0.0, min(100.0, tic_cmd))
+        self.aq["PCV-101"] = max(0.0, min(100.0, pic_cmd))
         self.q["Q0.0_PUMP"] = self.aq["P-101"] > 0.5
 
         # Pump run-feedback watchdog: commanded ON but no flow switch.

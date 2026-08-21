@@ -119,6 +119,32 @@ PID_LOOPS = {
         "direct": True,
         "init_mv": 57.0,           # initial integrator state near steady MV (%)
     },
+    "TIC-101": {
+        "pv_tag": "TT-101",
+        "mv_tag": "FV-101",
+        "setpoint": 313.0,         # K (40 °C cold outlet target)
+        "kp": 5.0,                 # % / K
+        "ki": 0.5,                 # % / (K*s)
+        "kd": 0.0,                 # % * s / K
+        "mv_min": 0.0,             # %
+        "mv_max": 100.0,           # %
+        "deriv_filter": 1.0,       # s
+        "direct": False,           # increasing temp error -> decreasing flow (cooling)
+        "init_mv": 50.0,
+    },
+    "PIC-101": {
+        "pv_tag": "PT-101",
+        "mv_tag": "PCV-101",
+        "setpoint": 110000.0,      # Pa (slightly above atmospheric)
+        "kp": 0.00005,             # % / Pa
+        "ki": 0.000005,            # % / (Pa*s)
+        "kd": 0.0,                 # % * s / Pa
+        "mv_min": 0.0,             # %
+        "mv_max": 100.0,           # %
+        "deriv_filter": 1.0,       # s
+        "direct": False,           # increasing pressure -> open outlet valve more
+        "init_mv": 50.0,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -166,6 +192,16 @@ GAIN_SCHEDULE = [
 LEVEL_LO = 0.10        # low-level warning
 LEVEL_HI = 0.85        # high-level warning
 LEVEL_HIHI = 0.95      # high-high -> trip interlock
+
+# ---------------------------------------------------------------------------
+# Additional PID loop thresholds (for heat exchanger & pressure)
+# ---------------------------------------------------------------------------
+TEMP_LO = 283.0        # K (10 °C low temperature warning)
+TEMP_HI = 353.0        # K (80 °C high temperature warning)
+TEMP_HIHI = 363.0      # K (90 °C high-high trip)
+PRESSURE_LO = 95000.0  # Pa (low pressure warning)
+PRESSURE_HI = 115000.0 # Pa (high pressure warning)
+PRESSURE_HIHI = 125000.0 # Pa (high-high trip)
 
 # Sensor fault detection thresholds
 SENSOR_RATE_LIMIT = 0.50   # m/s : implausible rate-of-change trips a sensor fault

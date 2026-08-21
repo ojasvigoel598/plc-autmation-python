@@ -26,6 +26,7 @@ from .leakdetect import MassBalanceLeakDetector
 from .leaks import LeakStore
 from .plc import PLC
 from .process import Plant
+from .process_units import ProcessUnits
 
 # Flow feedback threshold: below this the pump run switch reads "not running".
 PUMP_FB_THRESHOLD = 0.001  # m^3/s
@@ -40,6 +41,7 @@ class Runtime:
 
         self.plant = Plant()
         self.plc = PLC()
+        self.units = ProcessUnits()  # heat exchanger, pressure vessel, conveyor
 
         # Durable trend persistence (optional: None disables it, e.g. tests).
         self.historian = historian
@@ -95,6 +97,10 @@ class Runtime:
         for vtag in self.valve_stuck:
             plc.set_valve_feedback(vtag, self._valve_position_pct(vtag))
 
+        # Additional process unit transmitters into PLC input image.
+        plc.ai["TT-101"] = self.units.hx.cold_out
+        plc.ai["PT-101"] = self.units.pressure.pressure
+
         # 2) PROGRAM SCAN + OUTPUT UPDATE.
         plc.scan(dt)
 
@@ -115,6 +121,12 @@ class Runtime:
 
         plant.set_actuators(pump_speed=eff_pump, valve_open=eff_valves)
 
+        # 4) Apply process unit actuators from PLC output image.
+        fv101_cmd = plc.aq["FV-101"] / 100.0
+        self.units.hx.flow_cold = fv101_cmd * 0.002  # max cold flow 0.002 m^3/s
+        pcv101_cmd = plc.aq["PCV-101"] / 100.0
+        self.units.pressure.valve_position = pcv101_cmd
+
         # Apply leaks (process disturbances) to the plant.
         plant.leaks = dict(self.leaks)
         plant.valve_leaks = dict(self.valve_leaks)
@@ -123,6 +135,7 @@ class Runtime:
 
         # 4) PLANT PHYSICS advance.
         plant.step(dt)
+        self.units.step(dt)  # advance additional process units
 
         # 5) LEAK DETECTION: reconcile each tank's mass balance.
         self._detect_leaks(dt)
@@ -360,6 +373,7 @@ class Runtime:
             "interlocks": exp["interlocks"],
             "coils": plc.q,
             "scan_count": plc.scan_count,
+            "process_units": self.units.read(),
             "plc": {
                 "state": plc.state,
                 "scan_count": plc.scan_count,
