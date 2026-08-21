@@ -70,3 +70,7 @@ frontend/node_modules/
 
 # Portable Node toolchain used for the frontend build
 /tools/
+
+# Agent-only guidance (not part of the project; kept local for the agent)
+humanizer-context.md
+.claude/
