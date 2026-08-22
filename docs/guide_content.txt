@@ -57,7 +57,7 @@
 #B react-three-fiber / Three.js - React bindings for WebGL: the 3D scene is a React tree of mesh components.
 #B JSON - the wire format for both telemetry and commands.
 #B pytest - the test suite (about 70 tests) covering physics, control loops, the PLC engine, the API and the leak detector.
-#B Git - one commit per meaningful change, enforced by AGENTS.md and CLAUDE.md.
+#B Git - one commit per meaningful change.
 #PB
 
 #H1 Part II - How the simulator works
