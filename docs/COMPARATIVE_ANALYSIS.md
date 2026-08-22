@@ -139,10 +139,10 @@ production-grade virtual commissioning tooling.
   command path** — the demo is not a mockup; it drives the same REST/PLC
   pipeline an operator uses, so what you see in a demo is exactly what
   happens on the real system.
-- **Honest maturity positioning.** README, CLAUDE.md and the engineering
-  guide all state plainly that this is an educational digital-twin
-  prototype, not a certified controller. In a field full of overclaiming
-  demos, that is itself a differentiator.
+- **Honest maturity positioning.** The README and the engineering guide
+  both state plainly that this is an educational digital-twin prototype,
+  not a certified controller. In a field full of overclaiming demos, that
+  is itself a differentiator.
 
 ## 7. What it would take to match OpenPLC-grade tooling
 
