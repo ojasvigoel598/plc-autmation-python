@@ -74,3 +74,5 @@ frontend/node_modules/
 # Agent-only guidance (not part of the project; kept local for the agent)
 humanizer-context.md
 .claude/
+AGENTS.md
+CLAUDE.md
